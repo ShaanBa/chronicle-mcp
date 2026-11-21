@@ -17,6 +17,7 @@ function loadData() {
     relationships: [],
     threads: [],
     houses: [],
+    secrets: [],
   };
 
   const campaignsPath = path.join(dataDir, 'campaigns.json');
@@ -27,6 +28,7 @@ function loadData() {
   const relsPath = path.join(dataDir, 'relationships.json');
   const threadsPath = path.join(dataDir, 'threads.json');
   const housesPath = path.join(dataDir, 'houses.json');
+  const secretsPath = path.join(dataDir, 'secrets.json');
 
   if (fs.existsSync(campaignsPath)) raw.campaigns = JSON.parse(fs.readFileSync(campaignsPath, 'utf-8'));
   if (fs.existsSync(activePath)) {
@@ -41,6 +43,7 @@ function loadData() {
   if (fs.existsSync(relsPath)) raw.relationships = JSON.parse(fs.readFileSync(relsPath, 'utf-8'));
   if (fs.existsSync(threadsPath)) raw.threads = JSON.parse(fs.readFileSync(threadsPath, 'utf-8'));
   if (fs.existsSync(housesPath)) raw.houses = JSON.parse(fs.readFileSync(housesPath, 'utf-8'));
+  if (fs.existsSync(secretsPath)) raw.secrets = JSON.parse(fs.readFileSync(secretsPath, 'utf-8'));
 
   // Target campaign resolution from CLI argument
   const targetArg = process.argv[2] ? process.argv[2].trim().toLowerCase() : null;
@@ -73,6 +76,7 @@ function loadData() {
     relationships: raw.relationships.filter((r) => r.campaignId === campaignId),
     threads: raw.threads.filter((t) => t.campaignId === campaignId),
     houses: raw.houses.filter((h) => h.campaignId === campaignId),
+    secrets: raw.secrets.filter((s) => s.campaignId === campaignId),
   };
 
   return filtered;
@@ -99,6 +103,7 @@ const htmlContent = `<!DOCTYPE html>
     --seal-dark: #5E1F1B;
     --gold: #A9812C;
     --forest: #3B4A32;
+    --crimson: #9B1C1C;
     --line: rgba(43,33,21,0.18);
     --shadow: rgba(43,33,21,0.25);
     --font-display: "Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;
@@ -125,7 +130,7 @@ const htmlContent = `<!DOCTYPE html>
   /* ---------- HEADER ---------- */
   header{
     display:flex; align-items:center; gap:16px;
-    padding:14px 22px;
+    padding:12px 22px;
     border-bottom:2px solid var(--line);
     background:linear-gradient(180deg, rgba(255,255,255,0.15), transparent);
     flex-shrink:0;
@@ -155,15 +160,71 @@ const htmlContent = `<!DOCTYPE html>
     background:var(--vellum-card);
     border:1px solid var(--line);
     border-radius:3px;
-    padding:8px 12px 8px 30px;
+    padding:7px 12px 7px 30px;
     font-family:var(--font-body);
     font-size:13px;
     color:var(--ink);
-    width:220px;
+    width:200px;
     transition:width 0.2s ease, box-shadow 0.2s ease;
   }
-  #search:focus{ width:280px; outline:none; box-shadow:0 0 0 2px rgba(169,129,44,0.3); }
+  #search:focus{ width:250px; outline:none; box-shadow:0 0 0 2px rgba(169,129,44,0.3); }
   .search-icon{ position:absolute; left:9px; top:50%; transform:translateY(-50%); font-size:12px; color:var(--ink-soft); pointer-events:none; }
+
+  /* Mode Toggle */
+  .mode-toggle-wrap { display:flex; align-items:center; }
+  .mode-btn {
+    background:var(--vellum-card);
+    border:1px solid var(--line);
+    border-radius:3px;
+    padding:6px 12px;
+    font-family:var(--font-display);
+    font-size:12px;
+    color:var(--ink);
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    transition:all 0.2s ease;
+    white-space:nowrap;
+  }
+  .mode-btn:hover { border-color:var(--gold); box-shadow:0 1px 4px var(--shadow); }
+  .mode-btn.omniscient {
+    background:#2A181C;
+    color:#FCD8D8;
+    border-color:var(--seal);
+    box-shadow:0 0 6px rgba(124,42,37,0.3);
+  }
+
+  /* ---------- REALM PULSE BANNER ---------- */
+  #realm-banner {
+    background:linear-gradient(90deg, rgba(169,129,44,0.14), rgba(124,42,37,0.12));
+    border-bottom:1px solid var(--line);
+    padding:6px 22px;
+    font-size:12px;
+    display:flex;
+    align-items:center;
+    gap:14px;
+    flex-shrink:0;
+    overflow-x:auto;
+  }
+  .banner-meta { font-family:var(--font-display); font-weight:700; color:var(--ink); white-space:nowrap; }
+  .banner-badge {
+    font-family:var(--font-utility);
+    font-size:9.5px;
+    text-transform:uppercase;
+    padding:2px 7px;
+    border-radius:3px;
+    font-weight:700;
+    letter-spacing:0.06em;
+    white-space:nowrap;
+  }
+  .stability-stable { background:rgba(59,74,50,0.18); color:var(--forest); border:1px solid var(--forest); }
+  .stability-uneasy { background:rgba(169,129,44,0.20); color:var(--gold); border:1px solid var(--gold); }
+  .stability-volatile { background:rgba(194,65,12,0.20); color:#c2410c; border:1px solid #c2410c; }
+  .stability-fracturing { background:rgba(124,42,37,0.25); color:var(--seal); border:1px solid var(--seal); }
+  .banner-atmosphere { font-style:italic; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:120px; }
+  .banner-whispers { font-family:var(--font-utility); font-size:10px; color:var(--ink-soft); display:flex; gap:6px; align-items:center; white-space:nowrap; }
+  .whisper-item { background:rgba(43,33,21,0.06); padding:1px 6px; border-radius:3px; border:1px solid rgba(43,33,21,0.08); }
 
   /* ---------- LAYOUT ---------- */
   #body-wrap{ flex:1; display:flex; min-height:0; }
@@ -188,6 +249,8 @@ const htmlContent = `<!DOCTYPE html>
   .section-btn:hover{ background:rgba(43,33,21,0.05); color:var(--ink); }
   .section-btn.active{ border-left-color:var(--seal); color:var(--ink); font-weight:700; background:rgba(43,33,21,0.05); }
   .section-btn .glyph{ font-size:14px; width:16px; text-align:center; }
+  .section-btn#nav-secrets { color:var(--seal); }
+  .section-btn#nav-secrets.active { border-left-color:var(--seal); font-weight:700; }
 
   #list-pane{
     width:320px; flex-shrink:0;
@@ -221,6 +284,95 @@ const htmlContent = `<!DOCTYPE html>
     background:rgba(59,74,50,0.14); color:var(--forest);
     padding:2px 6px; border-radius:8px; margin:4px 4px 0 0; letter-spacing:0.03em;
   }
+
+  /* Severity badges */
+  .severity-pill { display:inline-block; font-family:var(--font-utility); font-size:9.5px; padding:2px 7px; border-radius:3px; text-transform:uppercase; font-weight:700; margin-right:6px; }
+  .severity-gossip { background:rgba(59,74,50,0.2); color:var(--forest); }
+  .severity-scandal { background:rgba(169,129,44,0.22); color:var(--gold); }
+  .severity-treason { background:rgba(194,65,12,0.22); color:#c2410c; }
+  .severity-dynasty_ending { background:rgba(124,42,37,0.3); color:var(--seal); font-weight:700; }
+
+  /* Primary source styling */
+  .source-type-pill {
+    display:inline-block; font-family:var(--font-utility); font-size:9.5px;
+    background:rgba(124,42,37,0.15); color:var(--seal);
+    padding:2px 7px; border-radius:3px; text-transform:uppercase; font-weight:700; margin-right:6px;
+  }
+  .reliability-pill {
+    display:inline-block; font-family:var(--font-utility); font-size:9.5px;
+    padding:2px 7px; border-radius:3px; text-transform:uppercase; font-weight:600; margin-right:6px;
+  }
+  .rel-true { background:rgba(59,74,50,0.18); color:var(--forest); }
+  .rel-biased { background:rgba(169,129,44,0.20); color:var(--gold); }
+  .rel-propaganda { background:rgba(194,65,12,0.22); color:#c2410c; }
+  .rel-myth { background:rgba(109,40,217,0.18); color:#6d28d9; }
+  .rel-forged { background:rgba(124,42,37,0.22); color:var(--seal); border:1px dashed var(--seal); }
+
+  .primary-source-box {
+    border-left:3px solid var(--seal);
+    background:rgba(124,42,37,0.05);
+    padding:16px 20px;
+    margin:14px 0 20px;
+    border-radius:2px;
+  }
+  .ballad-box {
+    font-family:var(--font-display);
+    font-style:italic;
+    border-left:3px solid var(--gold);
+    background:rgba(169,129,44,0.07);
+    padding:16px 22px;
+    margin:14px 0 20px;
+    line-height:1.8;
+  }
+
+  /* House headers */
+  .house-words-banner {
+    font-family:var(--font-display);
+    font-style:italic;
+    font-size:19px;
+    color:var(--seal);
+    margin:8px 0 16px;
+    padding:6px 14px;
+    background:rgba(124,42,37,0.07);
+    border-left:3px solid var(--seal);
+    border-radius:2px;
+    display:inline-block;
+  }
+  .house-sigil-box {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:13.5px;
+    color:var(--ink-soft);
+    margin-bottom:16px;
+    background:rgba(43,33,21,0.04);
+    padding:8px 12px;
+    border-radius:3px;
+  }
+
+  /* Relationships */
+  .relationship-card {
+    background:rgba(43,33,21,0.04);
+    border:1px solid var(--line);
+    border-radius:3px;
+    padding:8px 12px;
+    margin-bottom:8px;
+  }
+  .rel-secret {
+    border-left:3px dashed var(--seal) !important;
+    background:rgba(124,42,37,0.06);
+  }
+
+  /* Secrets detail */
+  .secret-truth-box {
+    background:#2A181C;
+    color:#FCEAEA;
+    border:1px solid var(--seal);
+    border-radius:3px;
+    padding:16px 20px;
+    margin-bottom:18px;
+  }
+  .secret-truth-box .field-label { color:#FFA2A2; }
 
   /* ---------- EMPTY STATES ---------- */
   .empty-state{
@@ -262,8 +414,9 @@ const htmlContent = `<!DOCTYPE html>
   #mobile-back{ display:none; }
   @media (max-width: 820px){
     header{ flex-wrap:wrap; }
-    #search{ width:140px; }
-    #search:focus{ width:170px; }
+    #search{ width:130px; }
+    #search:focus{ width:160px; }
+    #realm-banner { font-size:11px; padding:6px 14px; }
     #body-wrap{ position:relative; }
     nav#sections{ width:64px; padding:10px 0; }
     .section-btn{ padding:12px 0; justify-content:center; flex-direction:column; gap:3px; font-size:9px; }
@@ -290,7 +443,15 @@ const htmlContent = `<!DOCTYPE html>
       <span class="search-icon">&#9906;</span>
       <input id="search" type="text" placeholder="Search this campaign...">
     </div>
+    <div class="mode-toggle-wrap">
+      <button id="mode-toggle" class="mode-btn" title="Toggle Maester (Public) vs Omniscient (GM) Mode">
+        <span class="mode-icon">&#128366;</span>
+        <span id="mode-label">Maester Mode</span>
+      </button>
+    </div>
   </header>
+
+  <div id="realm-banner"></div>
 
   <div id="body-wrap">
     <nav id="sections">
@@ -299,6 +460,7 @@ const htmlContent = `<!DOCTYPE html>
       <button class="section-btn" data-section="houses"><span class="glyph">&#9819;</span><span class="label">Houses</span><span class="count" id="count-houses"></span></button>
       <button class="section-btn" data-section="threads"><span class="glyph">&#9875;</span><span class="label">Plots</span><span class="count" id="count-threads"></span></button>
       <button class="section-btn" data-section="tomes"><span class="glyph">&#10047;</span><span class="label">Tomes</span><span class="count" id="count-tomes"></span></button>
+      <button class="section-btn" data-section="secrets" id="nav-secrets" style="display:none;"><span class="glyph">&#128369;</span><span class="label">Secrets</span><span class="count" id="count-secrets"></span></button>
     </nav>
 
     <div id="list-pane"></div>
@@ -319,9 +481,11 @@ const htmlContent = `<!DOCTYPE html>
     relationships: CHRONICLE_DATA.relationships || [],
     threads: CHRONICLE_DATA.threads || [],
     houses: CHRONICLE_DATA.houses || [],
+    secrets: CHRONICLE_DATA.secrets || [],
     currentSection: 'timeline',
     selectedId: null,
-    searchTerm: ''
+    searchTerm: '',
+    omniscientMode: false
   };
 
   const SECTION_CONFIG = {
@@ -329,7 +493,8 @@ const htmlContent = `<!DOCTYPE html>
     characters: { label:'Dramatis Personae', glyph:'&#9820;', singular:'Character', primaryField:'coreDrive', dateField:null },
     houses:     { label:'Noble Houses', glyph:'&#9819;', singular:'House', primaryField:'status', dateField:null },
     threads:    { label:'Plot Threads', glyph:'&#9875;', singular:'Plot Thread', primaryField:'summary', dateField:'status' },
-    tomes:      { label:'Tomes', glyph:'&#10047;', singular:'Tome', primaryField:'content', dateField:'category' },
+    tomes:      { label:'Tomes & Primary Sources', glyph:'&#10047;', singular:'Tome', primaryField:'content', dateField:'sourceType' },
+    secrets:    { label:'Secrets & Conspiracies', glyph:'&#128369;', singular:'Secret', primaryField:'truth', dateField:'severity' },
   };
 
   function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -349,7 +514,12 @@ const htmlContent = `<!DOCTYPE html>
     return [];
   }
 
-  function currentArray(){ return state[state.currentSection]; }
+  function currentArray(){
+    if(state.currentSection === 'secrets'){
+      return state.omniscientMode ? state.secrets : state.secrets.filter(s => s.status === 'exposed');
+    }
+    return state[state.currentSection] || [];
+  }
 
   function filtered(){
     const arr = currentArray();
@@ -363,6 +533,8 @@ const htmlContent = `<!DOCTYPE html>
         (e.summary || '') + ' ' +
         (e.narrative || '') + ' ' + 
         (e.content || '') + ' ' + 
+        (e.truth || '') + ' ' +
+        (e.publicCoverStory || '') + ' ' +
         (e.coreDrive || '') + ' ' + 
         (e.flaw || '') + ' ' + 
         (e.relationships || '') + ' ' + 
@@ -376,19 +548,81 @@ const htmlContent = `<!DOCTYPE html>
     document.querySelectorAll('.section-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.section === state.currentSection);
     });
+    
+    // Toggle nav-secrets button display
+    const secretsNav = document.getElementById('nav-secrets');
+    if(secretsNav) {
+      secretsNav.style.display = state.omniscientMode ? 'flex' : 'none';
+    }
+
+    // Update counts
     ['characters','timeline','tomes','threads','houses'].forEach(s => {
       const el = document.getElementById('count-'+s);
       if(el) el.textContent = state[s].length || '';
     });
+    const secretsCountEl = document.getElementById('count-secrets');
+    if(secretsCountEl) {
+      secretsCountEl.textContent = state.secrets.length || '';
+    }
+
+    // Update mode button label
+    const modeLabel = document.getElementById('mode-label');
+    const modeBtn = document.getElementById('mode-toggle');
+    if(modeLabel && modeBtn) {
+      if(state.omniscientMode) {
+        modeLabel.textContent = 'Omniscient (GM)';
+        modeBtn.classList.add('omniscient');
+        modeBtn.title = 'Omniscient Mode active: All secrets and covert ties visible. Click to switch to Maester (Public) Mode.';
+      } else {
+        modeLabel.textContent = 'Maester Mode';
+        modeBtn.classList.remove('omniscient');
+        modeBtn.title = 'Maester Mode active: Only public record visible. Click to switch to Omniscient (GM) Mode.';
+      }
+    }
+  }
+
+  function renderRealmBanner(){
+    const banner = document.getElementById('realm-banner');
+    if(!banner) return;
+
+    const camp = state.campaign || {};
+    const mood = camp.realmMood;
+
+    let parts = [];
+    if(camp.currentDate) {
+      parts.push(\`<span class="banner-meta">&#9876; \${escapeHtml(camp.currentDate)}</span>\`);
+    }
+    if(camp.currentEra) {
+      parts.push(\`<span class="banner-meta" style="color:var(--gold);">&middot; \${escapeHtml(camp.currentEra)}</span>\`);
+    }
+
+    if(mood) {
+      if(mood.stability) {
+        const cls = 'stability-' + mood.stability;
+        parts.push(\`<span class="banner-badge \${cls}">\${escapeHtml(mood.stability)}</span>\`);
+      }
+      if(mood.atmosphere) {
+        parts.push(\`<span class="banner-atmosphere" title="\${escapeHtml(mood.atmosphere)}">\${escapeHtml(mood.atmosphere)}</span>\`);
+      }
+      if(mood.smallfolkWhispers && mood.smallfolkWhispers.length > 0) {
+        const whispersHtml = mood.smallfolkWhispers.slice(0, 3).map(w => \`<span class="whisper-item">&ldquo;\${escapeHtml(w)}&rdquo;</span>\`).join(' ');
+        parts.push(\`<span class="banner-whispers"><strong>Whispers:</strong> \${whispersHtml}</span>\`);
+      }
+    } else if(parts.length === 0) {
+      parts.push(\`<span class="banner-meta">&#9876; \${escapeHtml(camp.name || 'Chronicle Realm')}</span>\`);
+      parts.push(\`<span class="banner-atmosphere">Chronicle archive established.</span>\`);
+    }
+
+    banner.innerHTML = parts.join(' ');
   }
 
   function cardSnippet(entry, cfg){
-    const src = entry[cfg.primaryField] || entry.summary || entry.narrative || entry.content || entry.coreDrive || '';
+    const src = entry[cfg.primaryField] || entry.summary || entry.narrative || entry.content || entry.truth || entry.coreDrive || '';
     return escapeHtml(src).slice(0, 110);
   }
 
   function renderList(){
-    const cfg = SECTION_CONFIG[state.currentSection];
+    const cfg = SECTION_CONFIG[state.currentSection] || SECTION_CONFIG.timeline;
     const pane = document.getElementById('list-pane');
     const items = filtered().slice().sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
 
@@ -404,10 +638,19 @@ const htmlContent = `<!DOCTYPE html>
         const title = entry.title || entry.name || 'Untitled';
         const isDead = (entry.status || '').toLowerCase() === 'dead' || (entry.status || '').toLowerCase() === 'extinct';
         const metaBits = [];
+
         if(state.currentSection === 'timeline' && entry.date) metaBits.push(escapeHtml(entry.date));
         if(state.currentSection === 'characters' && entry.house) metaBits.push(escapeHtml(entry.house));
-        if(entry.status) metaBits.push(entry.status);
-        if(state.currentSection === 'tomes' && entry.category) metaBits.push(escapeHtml(entry.category));
+        if(state.currentSection === 'tomes') {
+          if(entry.sourceType) metaBits.push(escapeHtml(entry.sourceType));
+          if(entry.reliability && entry.reliability !== 'true') metaBits.push(escapeHtml(entry.reliability));
+        }
+        if(state.currentSection === 'secrets') {
+          if(entry.severity) metaBits.push(escapeHtml(entry.severity));
+          if(entry.status) metaBits.push(escapeHtml(entry.status));
+        } else if(entry.status) {
+          metaBits.push(entry.status);
+        }
 
         const tags = getTags(entry.tags);
         const tagsHtml = tags.slice(0, 3).map(t => \`<span class="tag-pill">\${escapeHtml(t)}</span>\`).join('');
@@ -437,9 +680,17 @@ const htmlContent = `<!DOCTYPE html>
     return \`<span class="status-dot \${cls}"></span>\`;
   }
 
+  function resolveCharName(id){
+    const c = state.characters.find(ch => ch.id === id);
+    if(c) return c.name;
+    const h = state.houses.find(ho => ho.id === id);
+    if(h) return 'House ' + h.name;
+    return id;
+  }
+
   function renderDetail(){
     const pane = document.getElementById('detail-pane');
-    const cfg = SECTION_CONFIG[state.currentSection];
+    const cfg = SECTION_CONFIG[state.currentSection] || SECTION_CONFIG.timeline;
     const arr = currentArray();
 
     if(!state.selectedId && arr.length > 0) {
@@ -467,13 +718,32 @@ const htmlContent = `<!DOCTYPE html>
     const tagsHtml = tags.map(t=>\`<span class="tag-pill">\${escapeHtml(t)}</span>\`).join('');
 
     if(state.currentSection === 'characters'){
-      html += \`<div class="detail-meta-row">\${statusDot(entry.status)}\${escapeHtml(entry.status||'unknown')} &nbsp;&middot;&nbsp; \${escapeHtml(entry.house||'House unknown')}</div>\`;
+      const metaRow = [];
+      metaRow.push(statusDot(entry.status) + escapeHtml(entry.status||'unknown'));
+      if(entry.house) metaRow.push(escapeHtml(entry.house));
+      if(typeof entry.computedAge === 'number') metaRow.push('Age ' + entry.computedAge);
+      else if(typeof entry.ageAtDeath === 'number') metaRow.push('Died at Age ' + entry.ageAtDeath);
+      if(entry.culture) metaRow.push(escapeHtml(entry.culture));
+      if(entry.religion) metaRow.push(escapeHtml(entry.religion));
+
+      html += \`<div class="detail-meta-row">\${metaRow.join(' &nbsp;&middot;&nbsp; ')}</div>\`;
       if(tagsHtml) html += \`<div style="margin-bottom:20px;">\${tagsHtml}</div>\`;
-      
+
+      if(entry.epithet) {
+        html += \`<div class="house-words-banner" style="font-size:16px;">&ldquo;\${escapeHtml(entry.epithet)}&rdquo;</div>\`;
+      }
+      if(entry.titles && entry.titles.length > 0) {
+        html += \`<div class="field-block"><div class="field-label">Titles & Honours</div><div class="field-value">\${entry.titles.map(t => \`<span class="tag-pill" style="background:rgba(169,129,44,0.18); color:var(--gold);">\${escapeHtml(t)}</span>\`).join('')}</div></div>\`;
+      }
+
+      if(entry.currentObsession) {
+        html += \`<div class="field-block" style="padding:10px 14px; background:rgba(169,129,44,0.1); border-left:3px solid var(--gold); border-radius:2px;"><div class="field-label">Current Obsession</div><div class="field-value" style="font-style:italic;">\${escapeHtml(entry.currentObsession)}</div></div>\`;
+      }
+
       const fields = [
         ['coreDrive','Core Drive'], ['flaw','Fatal Flaw'], ['face','Face & Bearing'],
-        ['voice','Voice'], ['modernAnalogue','Modern Analogue'],
-        ['relationships','Relationship Notes'], ['trajectory','Likely Trajectory']
+        ['voice','Voice'], ['speechTells','Speech Tells'], ['modernAnalogue','Modern Analogue'],
+        ['trajectory','Likely Trajectory']
       ];
       let hasIlluminated = false;
       fields.forEach(([key,label]) => {
@@ -489,35 +759,86 @@ const htmlContent = `<!DOCTYPE html>
         html += \`<div class="field-block"><div class="field-label">\${label}</div><div class="field-value">\${contentHtml}</div></div>\`;
       });
 
+      // Formative Scars
+      if(entry.formativeScars && entry.formativeScars.length > 0) {
+        const scarsHtml = entry.formativeScars.map(s => \`<div style="margin-bottom:6px; padding-left:8px; border-left:2px solid var(--seal);">&#9876; \${escapeHtml(s.summary)}</div>\`).join('');
+        html += \`<div class="field-block"><div class="field-label">Formative Scars</div><div class="field-value">\${scarsHtml}</div></div>\`;
+      }
+
+      // Active Grudges
+      if(entry.activeGrudges && entry.activeGrudges.length > 0) {
+        const grudgesHtml = entry.activeGrudges.map(g => {
+          const targetName = resolveCharName(g.targetId);
+          const intensityBadge = \`<span class="severity-pill severity-scandal">\${escapeHtml(g.intensity || 'bitter')}</span>\`;
+          return \`<div style="margin-bottom:6px; padding-left:8px; border-left:2px solid #c2410c;">\${intensityBadge}<strong>Against \${escapeHtml(targetName)}:</strong> \${escapeHtml(g.reason)} \${g.date ? \`(\${escapeHtml(g.date)})\` : ''}</div>\`;
+        }).join('');
+        html += \`<div class="field-block"><div class="field-label">Active Grudges</div><div class="field-value">\${grudgesHtml}</div></div>\`;
+      }
+
+      // Relationships
+      const charRels = state.relationships.filter(r => r.fromId === entry.id || r.toId === entry.id);
+      const visibleRels = state.omniscientMode ? charRels : charRels.filter(r => !r.isSecret);
+      if(visibleRels.length > 0) {
+        const relsHtml = visibleRels.map(r => {
+          const otherId = r.fromId === entry.id ? r.toId : r.fromId;
+          const otherName = resolveCharName(otherId);
+          const isForward = r.fromId === entry.id;
+          const secretBadge = r.isSecret ? '<span class="severity-pill severity-dynasty_ending">[Covert]</span> ' : '';
+          const sentimentBadge = (r.sentiment !== undefined) ? \`<span class="tag-pill" style="background:rgba(43,33,21,0.08);">Sentiment: \${r.sentiment > 0 ? '+' : ''}\${r.sentiment}</span>\` : '';
+          const facadeStr = r.publicFacade ? \`<span style="font-style:italic; color:var(--ink-soft);"> (Facade: "\${escapeHtml(r.publicFacade)}")</span>\` : '';
+          const noteStr = r.note ? \`<div style="font-size:13px; color:var(--ink-soft); margin-top:3px;">\${escapeHtml(r.note)}</div>\` : '';
+
+          return \`<div class="relationship-card \${r.isSecret ? 'rel-secret' : ''}">
+            \${secretBadge}<strong>\${escapeHtml(r.type)}</strong> \${isForward ? 'towards' : 'from'} <strong>\${escapeHtml(otherName)}</strong> \${sentimentBadge}\${facadeStr}
+            \${noteStr}
+          </div>\`;
+        }).join('');
+        html += \`<div class="field-block"><div class="field-label">Directed Relationships (\${visibleRels.length})</div><div class="field-value">\${relsHtml}</div></div>\`;
+      }
+
       if (entry.historyLog && entry.historyLog.length > 0) {
         let historyLogHtml = entry.historyLog.map(h => {
           const dateStr = h.date ? \`<span class="tag-pill" style="margin-right:6px; background:rgba(245,158,11,0.15); color:var(--gold);">\${escapeHtml(h.date)}</span>\` : '';
           return \`<div style="margin-bottom:8px; padding-left:10px; border-left:2px solid var(--gold);">\${dateStr}\${escapeHtml(h.note)}</div>\`;
         }).join('');
-        html += \`<div class="field-block"><div class="field-label">History Log (\${entry.historyLog.length})</div><div class="field-value">\${historyLogHtml}</div></div>\`;
+        html += \`<div class="field-block"><div class="field-label">Personal History Log (\${entry.historyLog.length})</div><div class="field-value">\${historyLogHtml}</div></div>\`;
       }
 
     } else if(state.currentSection === 'houses'){
-      html += \`<div class="detail-meta-row">\${statusDot(entry.status)}\${escapeHtml(entry.status||'unknown')} status</div>\`;
+      const metaRow = [];
+      metaRow.push(statusDot(entry.status) + escapeHtml(entry.status||'unknown') + ' house');
+      if(entry.seat) metaRow.push('Seat: ' + escapeHtml(entry.seat));
+      if(entry.culture) metaRow.push(escapeHtml(entry.culture));
+      if(entry.religion) metaRow.push(escapeHtml(entry.religion));
+      if(entry.prestige) metaRow.push(entry.prestige + ' prestige');
+
+      html += \`<div class="detail-meta-row">\${metaRow.join(' &nbsp;&middot;&nbsp; ')}</div>\`;
       if(tagsHtml) html += \`<div style="margin-bottom:20px;">\${tagsHtml}</div>\`;
+
+      if(entry.words) {
+        html += \`<div class="house-words-banner">&laquo; &ldquo;\${escapeHtml(entry.words)}&rdquo; &raquo;</div>\`;
+      }
+      if(entry.sigil) {
+        html += \`<div class="house-sigil-box">&#9876; <strong>Sigil & Arms:</strong> \${escapeHtml(entry.sigil)}</div>\`;
+      }
+      if(entry.reputation) {
+        html += \`<div class="field-block"><div class="field-label">Realm Reputation</div><div class="field-value" style="font-style:italic;">\${escapeHtml(entry.reputation)}</div></div>\`;
+      }
       if(entry.holdings && entry.holdings.length > 0) {
         html += \`<div class="field-block"><div class="field-label">Holdings</div><div class="field-value">\${entry.holdings.map(h => \`<span class="tag-pill">\${escapeHtml(h)}</span>\`).join('')}</div></div>\`;
-      }
-      if(entry.prestige) {
-        html += \`<div class="field-block"><div class="field-label">Prestige</div><div class="field-value">\${entry.prestige}</div></div>\`;
       }
       if (entry.historyLog && entry.historyLog.length > 0) {
         let historyLogHtml = entry.historyLog.map(h => {
           const dateStr = h.date ? \`<span class="tag-pill" style="margin-right:6px;">\${escapeHtml(h.date)}</span>\` : '';
           return \`<div style="margin-bottom:8px; padding-left:10px; border-left:2px solid var(--gold);">\${dateStr}\${escapeHtml(h.note)}</div>\`;
         }).join('');
-        html += \`<div class="field-block"><div class="field-label">House History Log</div><div class="field-value">\${historyLogHtml}</div></div>\`;
+        html += \`<div class="field-block"><div class="field-label">House Chronicle Log</div><div class="field-value">\${historyLogHtml}</div></div>\`;
       }
 
     } else if(state.currentSection === 'threads'){
       html += \`<div class="detail-meta-row">\${statusDot(entry.status)}\${escapeHtml(entry.status||'open')} plot thread</div>\`;
       if(tagsHtml) html += \`<div style="margin-bottom:20px;">\${tagsHtml}</div>\`;
-      html += \`<div class="field-block"><div class="field-label">Summary & Resolution</div><div class="field-value">\${illuminate(entry.summary||'')}</div></div>\`;
+      html += \`<div class="field-block"><div class="field-label">Summary & Plot Dynamics</div><div class="field-value">\${illuminate(entry.summary||'')}</div></div>\`;
 
     } else if(state.currentSection === 'timeline'){
       html += \`<div class="detail-meta-row">\${entry.date ? '&#8987; '+escapeHtml(entry.date) : ''}</div>\`;
@@ -528,9 +849,82 @@ const htmlContent = `<!DOCTYPE html>
       }
 
     } else if(state.currentSection === 'tomes'){
-      html += \`<div class="detail-meta-row">\${entry.category ? escapeHtml(entry.category) : ''}</div>\`;
+      const srcType = entry.sourceType || 'chronicle';
+      const rel = entry.reliability || 'true';
+      const relCls = 'rel-' + rel;
+
+      const metaRow = [];
+      metaRow.push(\`<span class="source-type-pill">\${escapeHtml(srcType)}</span>\`);
+      metaRow.push(\`<span class="reliability-pill \${relCls}">\${escapeHtml(rel)} reliability</span>\`);
+      if(entry.inWorldAuthor) metaRow.push('Author: ' + escapeHtml(entry.inWorldAuthor));
+      if(entry.inGameDate) metaRow.push('Dated: ' + escapeHtml(entry.inGameDate));
+      if(entry.category) metaRow.push(escapeHtml(entry.category));
+
+      html += \`<div class="detail-meta-row">\${metaRow.join(' &nbsp;&middot;&nbsp; ')}</div>\`;
       if(tagsHtml) html += \`<div style="margin-bottom:20px;">\${tagsHtml}</div>\`;
-      html += \`<div class="field-value">\${illuminate(entry.content||'')}</div>\`;
+
+      const boxCls = (srcType === 'ballad') ? 'ballad-box' : (srcType === 'letter' || srcType === 'decree' || srcType === 'treatise' ? 'primary-source-box' : '');
+      if(boxCls) {
+        html += \`<div class="\${boxCls}"><div class="field-value">\${illuminate(entry.content||'')}</div></div>\`;
+      } else {
+        html += \`<div class="field-value">\${illuminate(entry.content||'')}</div>\`;
+      }
+
+    } else if(state.currentSection === 'secrets'){
+      const sevCls = 'severity-' + (entry.severity || 'scandal');
+      const metaRow = [];
+      metaRow.push(\`<span class="severity-pill \${sevCls}">\${escapeHtml(entry.severity || 'scandal')}</span>\`);
+      metaRow.push(\`Status: \${escapeHtml(entry.status || 'buried')}\`);
+
+      html += \`<div class="detail-meta-row">\${metaRow.join(' &nbsp;&middot;&nbsp; ')}</div>\`;
+      if(tagsHtml) html += \`<div style="margin-bottom:20px;">\${tagsHtml}</div>\`;
+
+      // Ground Truth [OMNISCIENT]
+      html += \`<div class="secret-truth-box">
+        <div class="field-label">&#128369; Objective Ground Truth [GM ONLY]</div>
+        <div class="field-value" style="font-size:16px;">\${escapeHtml(entry.truth || '')}</div>
+      </div>\`;
+
+      if(entry.publicCoverStory) {
+        html += \`<div class="field-block" style="padding:12px 16px; background:rgba(43,33,21,0.06); border-radius:3px;">
+          <div class="field-label">Official Public Cover Story (Believed by the Realm)</div>
+          <div class="field-value" style="font-style:italic;">&ldquo;\${escapeHtml(entry.publicCoverStory)}&rdquo;</div>
+        </div>\`;
+      }
+
+      if(entry.leverageNote) {
+        html += \`<div class="field-block" style="padding:12px 16px; background:rgba(169,129,44,0.1); border-left:3px solid var(--gold); border-radius:2px;">
+          <div class="field-label">Potential Leverage & Fallout</div>
+          <div class="field-value">\${escapeHtml(entry.leverageNote)}</div>
+        </div>\`;
+      }
+
+      // Subject IDs
+      if(entry.subjectIds && entry.subjectIds.length > 0) {
+        const subjectsHtml = entry.subjectIds.map(id => \`<span class="tag-pill" style="background:rgba(124,42,37,0.15); color:var(--seal); font-weight:700;">\${escapeHtml(resolveCharName(id))}</span>\`).join('');
+        html += \`<div class="field-block"><div class="field-label">Subjects Implicated</div><div class="field-value">\${subjectsHtml}</div></div>\`;
+      }
+
+      // Known By
+      if(entry.knownByCharacterIds && entry.knownByCharacterIds.length > 0) {
+        const knownHtml = entry.knownByCharacterIds.map(id => \`<span class="tag-pill" style="background:rgba(59,74,50,0.18); color:var(--forest); font-weight:700;">&#10004; \${escapeHtml(resolveCharName(id))}</span>\`).join('');
+        html += \`<div class="field-block"><div class="field-label">Direct Knowledge (Holds Definitive Proof)</div><div class="field-value">\${knownHtml}</div></div>\`;
+      }
+
+      // Suspected By
+      if(entry.suspectedByCharacterIds && entry.suspectedByCharacterIds.length > 0) {
+        const suspectedHtml = entry.suspectedByCharacterIds.map(id => \`<span class="tag-pill" style="background:rgba(169,129,44,0.18); color:var(--gold);">? \${escapeHtml(resolveCharName(id))}</span>\`).join('');
+        html += \`<div class="field-block"><div class="field-label">Suspecting (Partial Clues, Lacks Proof)</div><div class="field-value">\${suspectedHtml}</div></div>\`;
+      }
+
+      // History Log
+      if(entry.historyLog && entry.historyLog.length > 0) {
+        let historyLogHtml = entry.historyLog.map(h => {
+          const dateStr = h.date ? \`<span class="tag-pill" style="margin-right:6px;">\${escapeHtml(h.date)}</span>\` : '';
+          return \`<div style="margin-bottom:8px; padding-left:10px; border-left:2px solid var(--seal);">\${dateStr}\${escapeHtml(h.note)}</div>\`;
+        }).join('');
+        html += \`<div class="field-block"><div class="field-label">Intrigue History Log (\${entry.historyLog.length})</div><div class="field-value">\${historyLogHtml}</div></div>\`;
+      }
     }
 
     pane.innerHTML = html;
@@ -540,6 +934,7 @@ const htmlContent = `<!DOCTYPE html>
 
   function renderAll(){
     renderNav();
+    renderRealmBanner();
     renderList();
     renderDetail();
   }
@@ -555,6 +950,20 @@ const htmlContent = `<!DOCTYPE html>
       renderAll();
     };
   });
+
+  // Mode toggle button
+  const modeBtn = document.getElementById('mode-toggle');
+  if(modeBtn) {
+    modeBtn.onclick = () => {
+      state.omniscientMode = !state.omniscientMode;
+      if(!state.omniscientMode && state.currentSection === 'secrets') {
+        state.currentSection = 'timeline';
+      }
+      const arr = currentArray();
+      state.selectedId = arr.length > 0 ? arr[0].id : null;
+      renderAll();
+    };
+  }
 
   let searchDebounce;
   document.getElementById('search').addEventListener('input', (e) => {
@@ -593,3 +1002,4 @@ console.log(`- Injected ${data.tomes.length} tomes`);
 console.log(`- Injected ${data.relationships.length} relationship edges`);
 console.log(`- Injected ${data.threads.length} plot threads`);
 console.log(`- Injected ${data.houses.length} noble houses`);
+console.log(`- Injected ${data.secrets.length} secrets`);
