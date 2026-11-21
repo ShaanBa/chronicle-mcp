@@ -30,16 +30,32 @@ function extractExcerpt(fullText: string, query: string, maxLength: number = 150
 export function searchChronicle(
   storage: Storage,
   query: string,
-  sections: ('characters' | 'timeline' | 'tomes' | 'threads' | 'houses' | 'secrets')[] = [
+  sectionsOrOptions?:
+    | ('characters' | 'timeline' | 'tomes' | 'threads' | 'houses' | 'secrets')[]
+    | { sections?: ('characters' | 'timeline' | 'tomes' | 'threads' | 'houses' | 'secrets')[]; includeSecrets?: boolean },
+  includeSecrets: boolean = true
+) {
+  let sections: ('characters' | 'timeline' | 'tomes' | 'threads' | 'houses' | 'secrets')[] = [
     'characters',
     'timeline',
     'tomes',
     'threads',
     'houses',
     'secrets',
-  ],
-  includeSecrets: boolean = true
-) {
+  ];
+  let incSecrets = includeSecrets;
+
+  if (Array.isArray(sectionsOrOptions)) {
+    sections = sectionsOrOptions;
+  } else if (sectionsOrOptions && typeof sectionsOrOptions === 'object') {
+    if (Array.isArray(sectionsOrOptions.sections)) {
+      sections = sectionsOrOptions.sections;
+    }
+    if (sectionsOrOptions.includeSecrets !== undefined) {
+      incSecrets = sectionsOrOptions.includeSecrets;
+    }
+  }
+
   const activeId = storage.activeCampaignId;
   const queryTrimmed = query.trim();
   if (!queryTrimmed) {
@@ -193,9 +209,12 @@ export function searchChronicle(
     }
   }
 
-  if (includeSecrets && sections.includes('secrets')) {
+  if (sections.includes('secrets')) {
     const secrets = storage.secrets.filter((s) => s.campaignId === activeId);
     for (const s of secrets) {
+      if (!incSecrets && s.status !== 'exposed') {
+        continue;
+      }
       const matchedFields: string[] = [];
       if (s.title.toLowerCase().includes(qLower)) matchedFields.push('title');
       if (s.truth.toLowerCase().includes(qLower)) matchedFields.push('truth');
@@ -209,10 +228,11 @@ export function searchChronicle(
         results.secrets.push({
           id: s.id,
           titleOrName: s.title,
+          title: s.title,
           section: 'secrets',
           excerpt: extractExcerpt(textForExcerpt, queryTrimmed),
           matchedFields,
-        });
+        } as any);
 
         if (results.secrets.length >= 15) break;
       }

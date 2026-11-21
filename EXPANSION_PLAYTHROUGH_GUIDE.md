@@ -85,10 +85,124 @@ Manage noble dynasties and realm holdings separately from individual characters.
 
 ---
 
-## 6. Expanded 5-Section Global Search
-`search_chronicle("Gideon")` now searches across all 5 memory stores simultaneously:
+## 6. Expanded 6-Section Global Search
+`search_chronicle("Gideon")` searches across all 6 memory stores simultaneously:
 1. `characters`
 2. `timeline`
 3. `tomes`
 4. `threads`
 5. `houses`
+6. `secrets` (with `includeSecrets: false` for public record, or `includeSecrets: true` for GM omniscience)
+
+---
+
+## 7. Director & Intrigue Protocol (Phases 1 & 2)
+
+### 7.1 Before Any Multi-Character Scene (`get_scene_briefing`)
+Before roleplaying any scene involving two or more characters, always invoke `get_scene_briefing`:
+
+```json
+{
+  "characterIds": ["Lord Raymund Mooton", "Maester Corwyn", "Ser Bryan"],
+  "locationName": "The Salt Cellar, Maidenpool",
+  "povCharacterId": "Lord Raymund Mooton",
+  "includeOmniscientSecrets": true
+}
+```
+
+#### What It Returns in Under 12 KB:
+1. **Scene Context & Atmosphere**: In-game date, current era, stability (`stable` | `uneasy` | `volatile` | `fracturing`), weather/season, and smallfolk tavern whispers.
+2. **Compact Cast Cards**: Age automatically computed from birth year and realm year anchor, noble house motto and sigil, speech tells, fatal flaw, current obsession, and up to 3 formative scars (with personal history logs strictly trimmed to the 2 most recent entries).
+3. **In-Room Relational Friction**: Directed ties, asymmetric sentiments (-100 to +100), public facades masking hostility, and covert debts/alliances.
+4. **In-Room Grudges**: Unforgiven slights and blood vendettas between characters standing in the room.
+5. **Intrigue Matrix**:
+   - `activeLeverage`: Who holds proof or suspicion over whom.
+   - `sharedConspiracies`: Coded glances and mutual liability shared between characters.
+   - `hiddenBlindSpots`: Secrets concerning someone in the room that no one present knows.
+   - `gmGuardrail`: **CRITICAL ANTI-METAGAMING GUARD**. Explicitly lists the secrets unbeknownst to the POV character. Play them as genuinely unaware of these hidden truths!
+
+---
+
+### 7.2 Separating Public History from Covert Conspiracy
+Never log a hidden conspiracy or covert murder directly as a public timeline event. Maintain strict epistemic separation:
+
+* **Public Record (`log_timeline_event`)**: Use for realm-wide events, battles, open tourneys, treaties, and coronation decrees that are common knowledge.
+* **Covert Ground Truth (`upsert_secret`)**: Track hidden truths, bastard lineages, assassinations, and embezzlements with a clear `publicCoverStory`:
+  ```json
+  {
+    "title": "Lord Bryan's True Poisoner",
+    "truth": "Lady Eleanor dissolved tears of Lys in his hippocras.",
+    "publicCoverStory": "Lord Bryan perished of a sudden belly-ague.",
+    "severity": "treason",
+    "status": "buried",
+    "subjectIds": ["Lady Eleanor", "Lord Bryan"],
+    "knownByCharacterIds": ["Lady Eleanor", "Maester Corwyn"],
+    "suspectedByCharacterIds": ["Ser Bryan"],
+    "leverageNote": "Corwyn kept the poisoned flagon wrapped in silk."
+  }
+  ```
+* **Spreading Knowledge & Exposure (`update_secret_knowledge`)**:
+  - `learns`: Character discovers objective ground truth (automatically supersedes suspicion).
+  - `suspects`: Character notices clues or unverified whispers.
+  - `forgets`: Character is silenced, memory lost, or blackmailed into compliance.
+  - `exposes`: Public revelation! Shifts status to `exposed`, records the expose in the secret's history log, and automatically posts an `Exposed:` timeline event if `autoLogTimelineEvent: true`.
+
+---
+
+### 7.3 Keeping the Realm Alive (`update_realm_pulse`)
+Periodically advance the living world to reflect ongoing wars, seasons, and tavern mood:
+
+```json
+{
+  "currentDate": "298 AC, Late Autumn",
+  "currentSortYear": 298,
+  "currentEra": "The Gathering Storm",
+  "realmMood": {
+    "atmosphere": "Tense and expectant; grain wagons rumble south through mud.",
+    "stability": "volatile",
+    "seasonOrWeather": "Chilling rains and early frost"
+  },
+  "addWhisper": "They say shadows walk the wall near the Nightfort.",
+  "addCrisis": "Ironborn reavers sighted off the mouth of the Trident"
+}
+```
+
+Updating `currentSortYear` immediately updates dynamic age math for every living character in the realm.
+
+---
+
+### 7.4 Cultural Echoes Rule (Biased Primary Sources in `Tome`)
+History in chronicle-mcp is written by unreliable, opinionated mortals—not neutral encyclopedists. Whenever a major tragedy, execution, or victory occurs, capture how it echoes through culture:
+
+* Use `sourceType`: `ballad`, `letter`, `decree`, `rumor`, `prophecy`, `epitaph`, `treatise`.
+* Set `reliability`: `true`, `biased`, `propaganda`, `myth`, `forged`.
+* Credit `inWorldAuthor` and tag `relatedCharacterIds`.
+
+```json
+{
+  "title": "The Ballad of the Salt Cellars",
+  "sourceType": "ballad",
+  "inWorldAuthor": "Tom of the Sevenstreams",
+  "reliability": "biased",
+  "relatedCharacterIds": ["Lord Raymund Mooton"],
+  "content": "A mocking tavern song whispered across the riverlands claiming the fish of Maidenpool swim with scales of gold and hearts of salt."
+}
+```
+
+---
+
+### 7.5 Character Evolution Rule (Scars, Grudges & Obsessions)
+Characters should not remain static stat-blocks. When high-stakes scenes conclude:
+* **Update `currentObsession`**: e.g., `"Securing a Valyrian steel blade before winter"`.
+* **Add `formativeScars`**: Physical or psychological trauma tied to an event ID.
+* **Register `activeGrudges`**: Record the target, reason, and intensity (`petty`, `bitter`, `blood_oath`).
+* **Update `titles` and `epithet`**: e.g. `"The Iron-Handed"`.
+
+---
+
+### 7.6 Asymmetric & Hidden Social Graph (`add_relationship`)
+Noble courts thrive on two-faced courtesies. Use the upgraded relationship flags:
+* `isSecret: true`: Hidden lovers, secret alliances, or covert creditors.
+* `sentiment`: Numeric score (-100 to +100) matching grand-strategy instincts.
+* `publicFacade`: In-room facade, e.g. `"Obsequious smiling vassal"` while the true edge type is `enemy`.
+* `oneWay: true`: Writes only the forward edge, leaving the counterpart unaware of the betrayal.

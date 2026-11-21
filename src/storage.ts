@@ -253,6 +253,7 @@ export class Storage {
       this.writeTimers[type] = null;
     }
 
+    if (!fs.existsSync(this.dataDir)) return;
     if (!this.pendingWrites.has(type)) return;
 
     let targetPath: string;
@@ -418,11 +419,12 @@ export function resolveCharacterRef(
  */
 export function attachComputedAge(character: Character, campaign?: Campaign): Character {
   const copy = { ...character };
-  if (campaign && typeof campaign.currentSortYear === 'number' && typeof character.birthYear === 'number') {
-    if (character.status === 'alive') {
-      copy.computedAge = campaign.currentSortYear - character.birthYear;
-    } else if (character.status === 'dead' && typeof character.deathYear === 'number') {
+  if (typeof character.birthYear === 'number') {
+    if (character.status === 'dead' && typeof character.deathYear === 'number') {
       copy.ageAtDeath = character.deathYear - character.birthYear;
+      copy.computedAge = copy.ageAtDeath;
+    } else if (character.status === 'alive' && campaign && typeof campaign.currentSortYear === 'number') {
+      copy.computedAge = campaign.currentSortYear - character.birthYear;
     }
   }
   return copy;

@@ -9,6 +9,7 @@ import {
   createCampaign,
   setActiveCampaign,
   getActiveCampaign,
+  updateRealmPulse,
 } from '../src/tools/campaigns.js';
 import {
   listCharacters,
@@ -54,6 +55,20 @@ import {
   searchChronicle,
   getRealmRecap,
 } from '../src/tools/search.js';
+import {
+  upsertSecret,
+  updateSecretKnowledge,
+  listSecrets,
+  getCharacterKnowledge,
+} from '../src/tools/secrets.js';
+import {
+  getSceneBriefing,
+} from '../src/tools/director.js';
+import {
+  attachComputedAge,
+  resolveEntityRef,
+  resolveCharacterRef,
+} from '../src/storage.js';
 import { runCampaignMigration } from './migrate-add-campaign-id.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -349,6 +364,349 @@ async function runSmokeTest() {
     const reloadedChars: any[] = JSON.parse(fs.readFileSync(rawCharsPath, 'utf-8'));
     const legacy = reloadedChars.find((c) => c.id === 'legacy-char-999');
     assert(legacy && legacy.campaignId === 'campaign-semien', 'Legacy record stamped with campaign-semien');
+  });
+
+  // 13. Legacy Campaign Compatibility
+  console.log('\nTest 13: Legacy Campaign Compatibility (Pre-Phase-1 compatibility)');
+  const campLegacyRes = createCampaign(storage, 'Legacy Westeros');
+  const campLegacyId = campLegacyRes.campaign.id;
+  setActiveCampaign(storage, campLegacyId);
+
+  // Directly insert a legacy un-augmented character and tome
+  const legacyChar = {
+    id: 'char-legacy-robert',
+    campaignId: campLegacyId,
+    name: 'Robert Baratheon',
+    status: 'alive' as const,
+    tags: ['King'],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  storage.characters.push(legacyChar);
+
+  const legacyTome = {
+    id: 'tome-legacy-lineage',
+    campaignId: campLegacyId,
+    title: 'The Lineages and Histories of the Great Houses',
+    content: 'A massive book by Grand Maester Malleon.',
+    tags: ['Lineage'],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  storage.tomes.push(legacyTome);
+
+  check('Legacy campaign loads getRealmRecap with zero errors and empty pulse fallback', () => {
+    const recap = getRealmRecap(storage);
+    assert(recap.success === true, 'getRealmRecap succeeded on legacy campaign');
+    assert(recap.recap.campaign === 'Legacy Westeros', 'Recap campaign name matches');
+    assert(Array.isArray(recap.recap.activeSecretsSummary.secrets), 'activeSecretsSummary.secrets is array');
+  });
+
+  check('Legacy campaign searchChronicle succeeds with 6 sections', () => {
+    const search = searchChronicle(storage, 'Baratheon');
+    assert(search.success === true, 'searchChronicle succeeded');
+    assert(search.results.characters.length === 1, 'Found legacy character');
+    assert(Array.isArray(search.results.secrets), 'secrets section exists');
+  });
+
+  check('Legacy campaign listCharacters succeeds without errors', () => {
+    const chars = listCharacters(storage);
+    assert(chars.success === true, 'listCharacters succeeded');
+    assert(chars.characters.some((c) => c.name === 'Robert Baratheon'), 'Found legacy character in list');
+  });
+
+  // 14. Name-to-ID Resolution Everywhere
+  console.log('\nTest 14: Name-to-ID Resolution Everywhere');
+  const raymundCharRes = upsertCharacter(storage, {
+    name: 'Lord Raymund Mooton',
+    status: 'alive',
+    house: 'Mooton',
+  });
+  const raymundId = raymundCharRes.character.id;
+
+  const secret14Res = upsertSecret(storage, {
+    title: 'Smuggled Dragon Eggs',
+    truth: 'Three dragon eggs are hidden in the Maidenpool salt cellars.',
+    publicCoverStory: 'Shipment of Essosi spices.',
+    severity: 'treason',
+    status: 'buried',
+    subjectIds: ['Lord Raymund Mooton'],
+    knownByCharacterIds: ['Lord Raymund Mooton'],
+  });
+
+  check('upsertSecret resolves character name to canonical UUID on write', () => {
+    assert(secret14Res.success === true, 'Secret created');
+    assert(secret14Res.secret.knownByCharacterIds.includes(raymundId), 'knownBy contains canonical UUID');
+    assert(!secret14Res.secret.knownByCharacterIds.includes('Lord Raymund Mooton'), 'Raw name string was replaced');
+    assert(secret14Res.secret.subjectIds.includes(raymundId), 'subjectIds contains canonical UUID');
+  });
+
+  check('getCharacterKnowledge resolves character name and retrieves known secrets', () => {
+    const knowRes = getCharacterKnowledge(storage, { characterId: 'Lord Raymund Mooton' });
+    assert(knowRes.success === true, 'getCharacterKnowledge succeeded');
+    assert(knowRes.characterId === raymundId, 'Resolved to raymundId');
+    assert(knowRes.knowsCount === 1, 'knowsCount is 1');
+    assert(knowRes.knows[0].title === 'Smuggled Dragon Eggs', 'Found secret in knows list');
+    assert(knowRes.knows[0].truth.includes('salt cellars'), 'Truth included for known secret');
+  });
+
+  // 15. Knowledge Superseding
+  console.log('\nTest 15: Knowledge Superseding (Knowing supersedes Suspecting)');
+  const charMallisterRes = upsertCharacter(storage, { name: 'Ser Jason Mallister', status: 'alive' });
+  const charMallisterId = charMallisterRes.character.id;
+
+  const secret15Res = upsertSecret(storage, {
+    title: 'Poisoned Chalice Plot',
+    truth: 'Strangler crystals bought from the Alchemists Guild.',
+    publicCoverStory: 'Wine turned sour in the barrel.',
+    severity: 'scandal',
+    status: 'buried',
+    suspectedByCharacterIds: ['Ser Jason Mallister'],
+  });
+  const secret15Id = secret15Res.secret.id;
+
+  check('Initial secret state puts character in suspectedBy and not knownBy', () => {
+    const s = storage.secrets.find((sec) => sec.id === secret15Id)!;
+    assert(s.suspectedByCharacterIds.includes(charMallisterId), 'Jason is suspectedBy');
+    assert(!s.knownByCharacterIds.includes(charMallisterId), 'Jason is not knownBy');
+  });
+
+  check('updateSecretKnowledge with action: learns moves character from suspectedBy to knownBy', () => {
+    const updateRes = updateSecretKnowledge(storage, {
+      secretId: secret15Id,
+      characterId: 'Ser Jason Mallister',
+      action: 'learns',
+      note: 'Found the poisoned flagon in the pantry.',
+    });
+    assert(updateRes.success === true, 'updateSecretKnowledge succeeded');
+    const s = storage.secrets.find((sec) => sec.id === secret15Id)!;
+    assert(s.knownByCharacterIds.includes(charMallisterId), 'Character is now in knownByCharacterIds');
+    assert(!s.suspectedByCharacterIds.includes(charMallisterId), 'Character was removed from suspectedByCharacterIds');
+  });
+
+  // 16. Anti-Metagaming Isolation
+  console.log('\nTest 16: Anti-Metagaming Isolation (Epistemic Separation)');
+  const charVymanRes = upsertCharacter(storage, { name: 'Maester Vyman', status: 'alive' });
+  const charVymanId = charVymanRes.character.id;
+
+  // Maester Vyman suspects the Poisoned Chalice Plot
+  updateSecretKnowledge(storage, {
+    secretId: secret15Id,
+    characterId: charVymanId,
+    action: 'suspects',
+  });
+
+  check('getCharacterKnowledge for suspecter conceals truth and exposes only publicCoverStory', () => {
+    const knowRes = getCharacterKnowledge(storage, { characterId: charVymanId });
+    assert(knowRes.success === true, 'getCharacterKnowledge succeeded');
+    assert(knowRes.suspectsCount === 1, 'suspectsCount is 1');
+    const suspectedItem = knowRes.suspects[0];
+    assert(suspectedItem.title === 'Poisoned Chalice Plot', 'Suspected title matches');
+    assert(suspectedItem.truth === undefined, 'Ground truth is strictly UNDEFINED for suspecter');
+    assert(suspectedItem.publicCoverStory === 'Wine turned sour in the barrel.', 'Public cover story shown');
+  });
+
+  // 17. Secret Exposure Cascade
+  console.log('\nTest 17: Secret Exposure Cascade');
+  check('updateSecretKnowledge with action: exposes updates status, historyLog, and logs timeline event', () => {
+    const initialTimelineCount = storage.timeline.length;
+    const exposeRes = updateSecretKnowledge(storage, {
+      secretId: secret15Id,
+      characterId: charMallisterId,
+      action: 'exposes',
+      note: 'Jason produced the flagon before the Great Council.',
+      autoLogTimelineEvent: true,
+      date: '298 AC',
+    });
+    assert(exposeRes.success === true, 'Exposure succeeded');
+    const s = storage.secrets.find((sec) => sec.id === secret15Id)!;
+    assert(s.status === 'exposed', 'Secret status changed to exposed');
+    assert(s.historyLog.some((h) => h.note.includes('Jason produced the flagon')), 'historyLog recorded exposure note');
+
+    // Timeline cascade verification
+    assert(storage.timeline.length === initialTimelineCount + 1, 'Timeline entry was created');
+    const createdEvent = storage.timeline[storage.timeline.length - 1];
+    assert(createdEvent.title.includes('Exposed: Poisoned Chalice Plot'), 'Event title matches');
+    assert(createdEvent.tags.includes('Secret Exposure'), 'Event tagged Secret Exposure');
+    assert(s.relatedEventIds.includes(createdEvent.id), 'Secret links to timeline event');
+  });
+
+  // 18. Public vs. Omniscient Search
+  console.log('\nTest 18: Public vs. Omniscient Search Filtering');
+  const secret18Res = upsertSecret(storage, {
+    title: 'The Hidden Catacombs',
+    truth: 'An underground tunnel connects the crypts to the Blackwater Rush with valyrianglyphs.',
+    publicCoverStory: 'The old drains collapsed centuries ago.',
+    severity: 'scandal',
+    status: 'buried',
+  });
+
+  check('searchChronicle with includeSecrets: false hides buried secret', () => {
+    const searchPublic = searchChronicle(storage, 'valyrianglyphs', { includeSecrets: false });
+    assert(searchPublic.success === true, 'Public search succeeded');
+    assert(searchPublic.results.secrets.length === 0, 'Buried secret not returned in public search');
+  });
+
+  check('searchChronicle with includeSecrets: true returns buried secret', () => {
+    const searchOmni = searchChronicle(storage, 'valyrianglyphs', { includeSecrets: true });
+    assert(searchOmni.success === true, 'Omniscient search succeeded');
+    assert(searchOmni.results.secrets.length === 1, 'Buried secret returned in omniscient search');
+    assert(
+      (searchOmni.results.secrets[0] as any).title === 'The Hidden Catacombs' ||
+      searchOmni.results.secrets[0].titleOrName === 'The Hidden Catacombs',
+      'Found correct secret'
+    );
+  });
+
+  // 19. Age Math Edge Cases
+  console.log('\nTest 19: Age Math Edge Cases');
+  check('attachComputedAge calculates correct age for alive character with currentSortYear', () => {
+    const campWithYear = { ...storage.getActiveCampaign(), currentSortYear: 298 };
+    const charAlive = { id: 'c1', name: 'Alive Char', status: 'alive' as const, birthYear: 260 };
+    const enriched = attachComputedAge(charAlive, campWithYear);
+    assert(enriched.computedAge === 38, `Expected age 38, got ${enriched.computedAge}`);
+  });
+
+  check('attachComputedAge calculates correct ageAtDeath for deceased character', () => {
+    const campWithYear = { ...storage.getActiveCampaign(), currentSortYear: 298 };
+    const charDead = { id: 'c2', name: 'Dead Char', status: 'dead' as const, birthYear: 220, deathYear: 265 };
+    const enriched = attachComputedAge(charDead, campWithYear);
+    assert(enriched.computedAge === 45, `Expected computedAge 45, got ${enriched.computedAge}`);
+    assert(enriched.ageAtDeath === 45, `Expected ageAtDeath 45, got ${enriched.ageAtDeath}`);
+  });
+
+  check('attachComputedAge returns undefined (not NaN) when currentSortYear is absent', () => {
+    const campNoYear = { ...storage.getActiveCampaign(), currentSortYear: undefined };
+    const charAlive = { id: 'c3', name: 'No Year Char', status: 'alive' as const, birthYear: 260 };
+    const enriched = attachComputedAge(charAlive, campNoYear);
+    assert(enriched.computedAge === undefined, `Expected undefined, got ${enriched.computedAge}`);
+    assert(!Number.isNaN(enriched.computedAge), 'computedAge is not NaN');
+  });
+
+  // 20. Intrigue Matrix Precision in getSceneBriefing
+  console.log('\nTest 20: Intrigue Matrix Precision in getSceneBriefing');
+  const charAliceRes = upsertCharacter(storage, { name: 'Lady Alice', status: 'alive' });
+  const charAliceId = charAliceRes.character.id;
+
+  const charBobRes = upsertCharacter(storage, { name: 'Lord Bob', status: 'alive' });
+  const charBobId = charBobRes.character.id;
+
+  const charCharlieRes = upsertCharacter(storage, {
+    name: 'Ser Charlie',
+    status: 'alive',
+    activeGrudges: [
+      {
+        targetId: charAliceId,
+        intensity: 'mortal',
+        reason: 'Slain kin during the siege',
+        date: '295 AC',
+      },
+    ],
+  });
+  const charCharlieId = charCharlieRes.character.id;
+
+  // Secret 1: Alice knows truth about Bob (Bob is subject, Alice is knower)
+  upsertSecret(storage, {
+    title: 'Bob Embezzled the Treasury',
+    truth: 'Bob diverted 10,000 gold dragons to Braavos.',
+    publicCoverStory: 'Audited accounts were clean.',
+    severity: 'treason',
+    status: 'buried',
+    subjectIds: [charBobId],
+    knownByCharacterIds: [charAliceId],
+    leverageNote: 'Alice holds signed receipts proving the theft.',
+  });
+
+  // Secret 2: Bob and Charlie share a secret conspiracy
+  upsertSecret(storage, {
+    title: 'The Silent Pact',
+    truth: 'Bob and Charlie agreed to divide the borderlands upon the king death.',
+    severity: 'scandal',
+    status: 'buried',
+    subjectIds: [charBobId, charCharlieId],
+    knownByCharacterIds: [charBobId, charCharlieId],
+  });
+
+  const briefingRes = getSceneBriefing(storage, {
+    characterIds: [charAliceId, charBobId, charCharlieId],
+    povCharacterId: charBobId,
+  });
+
+  check('getSceneBriefing identifies activeLeverage of Alice over Bob', () => {
+    assert(briefingRes.success === true, 'getSceneBriefing succeeded');
+    const lev = briefingRes.intrigueMatrix.activeLeverage.find(
+      (l: any) => l.holder === 'Lady Alice' && l.target === 'Lord Bob'
+    );
+    assert(lev !== undefined, 'Found Alice leverage over Bob');
+    assert(lev.secretTitle === 'Bob Embezzled the Treasury', 'Leverage secret title matches');
+  });
+
+  check('getSceneBriefing identifies sharedConspiracies between Bob and Charlie', () => {
+    const consp = briefingRes.intrigueMatrix.sharedConspiracies.find(
+      (c: any) => c.title === 'The Silent Pact'
+    );
+    assert(consp !== undefined, 'Found shared conspiracy');
+    assert(consp.conspirators.includes('Lord Bob') && consp.conspirators.includes('Ser Charlie'), 'Conspirators list Bob and Charlie');
+  });
+
+  check('getSceneBriefing sets gmGuardrail warning that POV Bob does not know Alice secret about him', () => {
+    assert(briefingRes.intrigueMatrix.gmGuardrail !== undefined, 'gmGuardrail is set');
+    assert(briefingRes.intrigueMatrix.gmGuardrail.includes('Bob Embezzled the Treasury'), 'gmGuardrail warns about unrevealed secret');
+    assert(briefingRes.intrigueMatrix.gmGuardrail.includes('Lord Bob does NOT know'), 'Warns specifically for Lord Bob');
+  });
+
+  check('getSceneBriefing includes inRoomGrudges for Charlie against Alice', () => {
+    const grudge = briefingRes.inRoomGrudges.find(
+      (g: any) => g.holder === 'Ser Charlie' && g.target === 'Lady Alice'
+    );
+    assert(grudge !== undefined, 'Found grudge in room');
+    assert(grudge.intensity === 'mortal', 'Grudge intensity matches');
+    assert(grudge.reason.includes('Slain kin'), 'Grudge reason matches');
+  });
+
+  // 21. Payload Size Guardrail (< 12KB)
+  console.log('\nTest 21: Payload Size Guardrail (< 12KB)');
+  // Add 30 historyLog entries to Alice
+  const bloatedAlice = storage.characters.find((c) => c.id === charAliceId)!;
+  bloatedAlice.historyLog = [];
+  for (let i = 1; i <= 30; i++) {
+    bloatedAlice.historyLog.push({
+      timestamp: Date.now() - i * 10000,
+      date: `29${i % 10} AC`,
+      note: `Detailed chronicle record #${i}: Great diplomatic envoy to the Free Cities detailing grain shipments, tariffs, military dispositions, and hostage exchanges.`,
+    });
+  }
+
+  // Add 15 tomes
+  for (let i = 1; i <= 15; i++) {
+    upsertTome(storage, {
+      title: `Grand Historical Codex Volume ${i}`,
+      content: `Extensive multi-paragraph historical treatise #${i} recording ancient battles, heraldic lineages, dynastic marriages, and ancestral conflicts across the seven kingdoms with deep narrative lore.`,
+      sourceType: 'letter',
+      relatedCharacterIds: [charAliceId],
+      reliability: 'biased',
+    });
+  }
+
+  const guardrailBriefing = getSceneBriefing(storage, {
+    characterIds: [charAliceId, charBobId],
+    povCharacterId: charBobId,
+  });
+
+  check('getSceneBriefing compacts cast historyLog to maximum 2 entries', () => {
+    const aliceInBriefing = guardrailBriefing.cast.find((c: any) => c.id === charAliceId);
+    assert(aliceInBriefing !== undefined, 'Alice in briefing');
+    assert(aliceInBriefing.historyLog.length <= 2, `History log truncated to <= 2 (was ${aliceInBriefing.historyLog.length})`);
+  });
+
+  check('getSceneBriefing limits localVoices to maximum 3 entries', () => {
+    assert(guardrailBriefing.localVoices.length <= 3, `localVoices capped at <= 3 (was ${guardrailBriefing.localVoices.length})`);
+  });
+
+  check('getSceneBriefing total serialized payload is under 12 KB', () => {
+    const payloadStr = JSON.stringify(guardrailBriefing);
+    const payloadSize = Buffer.byteLength(payloadStr, 'utf-8');
+    assert(payloadSize < 12288, `Payload size must be < 12KB (was ${payloadSize} bytes)`);
   });
 
   // Clean up scratch directory

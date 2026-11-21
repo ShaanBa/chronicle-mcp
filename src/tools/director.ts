@@ -89,6 +89,7 @@ export function getSceneBriefing(
       flaw: c.flaw,
       formativeScars,
       recentHistory,
+      historyLog: recentHistory,
     };
   });
 

@@ -181,13 +181,13 @@ export function updateSecretKnowledge(
 
       if (params.autoLogTimelineEvent) {
         const eventId = generateId();
-        const eventTags = [...new Set([charDisplayName, ...secret.tags, 'secret-exposed'])];
+        const eventTags = [...new Set([charDisplayName, ...secret.tags, 'Secret Exposure', 'secret-exposed'])];
         const narrative = `${charDisplayName} exposed the secret truth of '${secret.title}' to the realm: ${secret.truth}`;
 
         const timelineEntry: TimelineEntry = {
           id: eventId,
           campaignId: activeCampaignId,
-          title: `Secret Exposed: ${secret.title}`,
+          title: `Exposed: ${secret.title}`,
           date: params.date,
           tags: eventTags,
           narrative,
@@ -346,7 +346,9 @@ export function getCharacterKnowledge(
     success: true,
     characterId: canonicalCharId,
     characterName,
+    knowsCount: knows.length,
     knows,
+    suspectsCount: suspects.length,
     suspects,
     blindSpotsCount,
   };
