@@ -421,7 +421,7 @@ export function routeSkill(
     const score1 = primaryCandidate.score;
     const score2 = secondCandidate.score;
 
-    if (((score2 >= 10 && score2 >= score1 * 0.65) || secondCandidate.worldBoostTotal >= 8) && score1 < 1000) {
+    if (((score2 >= 10 && score2 >= score1 * 0.65) || (secondCandidate.worldBoostTotal >= 8 && score2 > 0)) && score1 < 1000) {
       const directives = extractDirectives(secondCandidate.skill.playbook, 3);
       if (directives.length > 0) {
         secondaryBlend = {

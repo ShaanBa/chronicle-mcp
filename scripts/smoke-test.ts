@@ -1250,7 +1250,7 @@ toolSequence:
     const leverageMatches = matrix.activeLeverage.filter((l: any) => l.secretTitle === 'The Queen Mother Poisoned the King');
     assert(leverageMatches.length === 0, 'Exposed secret must not appear in activeLeverage');
 
-    const blindSpotMatches = matrix.hiddenBlindSpots.filter((b: any) => b.secretTitle === 'The Queen Mother Poisoned the King');
+    const blindSpotMatches = matrix.hiddenBlindSpots.filter((b: any) => b.title === 'The Queen Mother Poisoned the King');
     assert(blindSpotMatches.length === 0, 'Exposed secret must not appear in hiddenBlindSpots');
   });
 
@@ -1271,6 +1271,37 @@ toolSequence:
     );
     assert(res.prefetchNotice !== undefined, 'prefetchNotice must be set');
     assert(res.prefetchNotice!.includes('No characterIds provided'), 'prefetchNotice informs user to call get_scene_briefing once participants are known');
+  });
+
+  // 34. subjectsInRoom precision: House-specific secrets don't falsely implicate other nobles
+  console.log('\nTest 34: subjectsInRoom precision — House Stark secret must NOT implicate Jaime Lannister');
+  const houseStarkSecret = upsertSecret(storage, {
+    title: 'The Stark Direwolf Prophecy',
+    truth: 'A secret known only to Stark blood',
+    status: 'buried',
+    severity: 'scandal',
+    subjectIds: [houseStarkRes.house.id],
+    knownByCharacterIds: [],
+    suspectedByCharacterIds: [],
+  });
+
+  check('Jaime Lannister is NOT listed as a subject of a House Stark secret in scene briefing', () => {
+    const briefing = getSceneBriefing(storage, {
+      characterIds: [starkChar.character.id, lannisterChar.character.id],
+      includeOmniscientSecrets: true,
+    });
+
+    const matrix = briefing.intrigueMatrix;
+    const lannisterAsSubject = (matrix.activeLeverage || []).filter(
+      (l: any) => l.target === 'Jaime Lannister' && l.secretTitle === 'The Stark Direwolf Prophecy'
+    );
+    assert(lannisterAsSubject.length === 0, `Jaime Lannister must NOT be a subject of a Stark-only secret (found ${lannisterAsSubject.length})`);
+
+    const robbAsSubject = (matrix.hiddenBlindSpots || []).filter(
+      (b: any) => b.title === 'The Stark Direwolf Prophecy'
+    );
+    // The secret has no knowers in the room, Robb is a subject via House Stark, so it appears as a blind spot
+    assert(robbAsSubject.length > 0, 'Robb Stark (via House Stark) should appear as a blind spot subject');
   });
 
   // Clean up scratch directory

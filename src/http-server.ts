@@ -184,14 +184,31 @@ const server = http.createServer(async (req: IncomingMessage, res: ServerRespons
           return;
         }
 
-        // Single-use: Consume and delete immediately
-        authCodes.delete(codeParam);
-
-        if (clientId && clientId !== entry.clientId) {
-          res.writeHead(401, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'invalid_client', error_description: 'Client ID mismatch for authorization code' }));
+        // STRICT: require valid client credentials before consuming code
+        if (clientId !== OAUTH_CLIENT_ID || clientSecret !== OAUTH_CLIENT_SECRET) {
+          authCodes.delete(codeParam); // consume to prevent replay
+          res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': `Bearer realm="chronicle"` });
+          res.end(JSON.stringify({ error: 'invalid_client', error_description: 'Invalid client credentials for authorization_code grant' }));
           return;
         }
+
+        // Parse redirect_uri from body for verification
+        let codeRedirectUri = '';
+        if (contentType.includes('application/json')) {
+          try { codeRedirectUri = JSON.parse(rawBody)?.redirect_uri || ''; } catch {}
+        } else {
+          codeRedirectUri = new URLSearchParams(rawBody).get('redirect_uri') || '';
+        }
+
+        if (codeRedirectUri && entry.redirectUri && codeRedirectUri !== entry.redirectUri) {
+          authCodes.delete(codeParam);
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' }));
+          return;
+        }
+
+        // Single-use: Consume and delete immediately
+        authCodes.delete(codeParam);
 
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
         res.end(
@@ -269,15 +286,29 @@ const server = http.createServer(async (req: IncomingMessage, res: ServerRespons
     const codeChallenge = url.searchParams.get('code_challenge') || undefined;
 
     if (redirectUri) {
+      let targetUrl: URL;
+      try {
+        targetUrl = new URL(redirectUri);
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid_request', error_description: 'Invalid redirect_uri' }));
+        return;
+      }
+
+      // Prune expired auth codes before inserting new entry
+      const nowMs = Date.now();
+      for (const [k, v] of authCodes.entries()) {
+        if (v.expiresAt < nowMs) authCodes.delete(k);
+      }
+
       const code = randomUUID();
       authCodes.set(code, {
         clientId: requestedClientId || OAUTH_CLIENT_ID,
         redirectUri,
-        expiresAt: Date.now() + 5 * 60 * 1000, // 5-minute TTL
+        expiresAt: nowMs + 5 * 60 * 1000, // 5-minute TTL
         codeChallenge,
       });
 
-      const targetUrl = new URL(redirectUri);
       targetUrl.searchParams.set('code', code);
       if (state) targetUrl.searchParams.set('state', state);
       res.writeHead(302, { Location: targetUrl.toString() });

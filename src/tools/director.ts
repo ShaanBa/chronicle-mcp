@@ -179,19 +179,24 @@ export function getSceneBriefing(
   for (const char of resolvedCast) {
     for (const grudge of char.activeGrudges || []) {
       const resolvedTarget = resolveEntityRef(storage, activeCampaignId, 'any', grudge.targetId);
-      const targetChar = resolvedCast.find(
+      const targetChars = resolvedCast.filter(
         (c) =>
           c.id === grudge.targetId ||
           c.id === resolvedTarget ||
           c.name.toLowerCase() === grudge.targetId.toLowerCase() ||
-          (c.house && (
-            c.house.toLowerCase() === grudge.targetId.toLowerCase() ||
-            c.house.toLowerCase() === resolvedTarget.toLowerCase() ||
-            representedHouseIds.has(resolvedTarget)
-          ))
+          (c.house && (() => {
+            const cOwnHouse = storage.houses.find(
+              (h) => h.campaignId === activeCampaignId && (h.id === c.house || h.name.toLowerCase() === c.house!.toLowerCase())
+            );
+            return (
+              c.house.toLowerCase() === grudge.targetId.toLowerCase() ||
+              c.house.toLowerCase() === resolvedTarget.toLowerCase() ||
+              (cOwnHouse && (cOwnHouse.id === resolvedTarget || cOwnHouse.name.toLowerCase() === resolvedTarget.toLowerCase()))
+            );
+          })())
       );
 
-      if (targetChar) {
+      for (const targetChar of targetChars) {
         inRoomGrudges.push({
           holder: char.name,
           target: targetChar.name,
@@ -224,7 +229,20 @@ export function getSceneBriefing(
     const subjectsInRoom = resolvedCast
       .filter((c) => {
         if (s.subjectIds.includes(c.id)) return true;
-        if (c.house && (s.subjectIds.includes(c.house) || representedHouseIds.has(c.house) || representedHouseNames.has(c.house.toLowerCase()))) return true;
+        if (c.house) {
+          const cHouse = storage.houses.find(
+            (h) => h.campaignId === activeCampaignId && (h.id === c.house || h.name.toLowerCase() === c.house!.toLowerCase())
+          );
+          const houseMatch = s.subjectIds.some((sid) => {
+            const sidLower = sid.toLowerCase();
+            return (
+              sid === c.house ||
+              sidLower === c.house!.toLowerCase() ||
+              (cHouse && (sid === cHouse.id || sidLower === cHouse.name.toLowerCase()))
+            );
+          });
+          if (houseMatch) return true;
+        }
         return false;
       })
       .map((c) => c.id);

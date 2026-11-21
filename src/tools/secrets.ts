@@ -52,6 +52,11 @@ export function upsertSecret(
       });
     }
 
+    const finalKnown = resolvedKnown ?? existing.knownByCharacterIds ?? [];
+    const finalSuspected = (resolvedSuspected ?? existing.suspectedByCharacterIds ?? []).filter(
+      (id) => !finalKnown.includes(id)
+    );
+
     secret = {
       ...existing,
       ...entityFields,
@@ -61,8 +66,8 @@ export function upsertSecret(
       severity: input.severity ?? existing.severity ?? 'scandal',
       status: input.status ?? existing.status ?? 'buried',
       subjectIds: resolvedSubjects ?? existing.subjectIds ?? [],
-      knownByCharacterIds: resolvedKnown ?? existing.knownByCharacterIds ?? [],
-      suspectedByCharacterIds: resolvedSuspected ?? existing.suspectedByCharacterIds ?? [],
+      knownByCharacterIds: finalKnown,
+      suspectedByCharacterIds: finalSuspected,
       leverageNote: input.leverageNote ?? existing.leverageNote,
       relatedEventIds: input.relatedEventIds ?? existing.relatedEventIds ?? [],
       tags: input.tags ?? existing.tags ?? [],

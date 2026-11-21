@@ -561,6 +561,7 @@ export function createChronicleServer(storageInstance?: Storage): Server {
                     type: 'string',
                     enum: ['true', 'biased', 'propaganda', 'myth', 'forged'],
                   },
+                  relatedCharacterId: { type: 'string', description: 'Filter by related character ID or name' },
                 },
               },
             },
