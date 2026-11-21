@@ -65,6 +65,20 @@ import {
   getSceneBriefing,
 } from '../src/tools/director.js';
 import {
+  routeSkill,
+  listSkills,
+  getSkill,
+} from '../src/tools/skills.js';
+import {
+  loadAllSkills,
+  getSkillById,
+  countWords,
+  DEFAULT_SKILLS_DIR,
+  clearSkillCache,
+  MAX_DESCRIPTION_WORDS,
+  MAX_PLAYBOOK_WORDS,
+} from '../src/skills/loader.js';
+import {
   attachComputedAge,
   resolveEntityRef,
   resolveCharacterRef,
@@ -708,6 +722,273 @@ async function runSmokeTest() {
     const payloadSize = Buffer.byteLength(payloadStr, 'utf-8');
     assert(payloadSize < 12288, `Payload size must be < 12KB (was ${payloadSize} bytes)`);
   });
+
+  // 22. Skill Loader & Word-Budget Constraints
+  console.log('\nTest 22: Skill Loader & Word-Budget Constraints');
+  clearSkillCache();
+  const allLoadedSkills = loadAllSkills();
+
+  check('Skill loader loads exactly 8 core cartridges', () => {
+    assert(allLoadedSkills.length === 8, `Expected 8 core skills, found ${allLoadedSkills.length}`);
+  });
+
+  check('All core skills have unique IDs and valid non-empty fields', () => {
+    const ids = new Set<string>();
+    for (const s of allLoadedSkills) {
+      assert(!ids.has(s.id), `Duplicate skill id: ${s.id}`);
+      ids.add(s.id);
+      assert(s.name.length > 0, `Skill ${s.id} missing name`);
+      assert(s.description.length > 0, `Skill ${s.id} missing description`);
+      assert(s.triggers.length > 0, `Skill ${s.id} triggers is empty`);
+      assert(s.toolSequence.length > 0, `Skill ${s.id} toolSequence is empty`);
+      assert(s.playbook.length > 0, `Skill ${s.id} playbook is empty`);
+    }
+  });
+
+  check(`All core skills obey description budget (<= ${MAX_DESCRIPTION_WORDS} words)`, () => {
+    for (const s of allLoadedSkills) {
+      const descWords = countWords(s.description);
+      assert(
+        descWords <= MAX_DESCRIPTION_WORDS,
+        `Skill '${s.id}' description exceeds ${MAX_DESCRIPTION_WORDS} words (${descWords} words: "${s.description}")`
+      );
+    }
+  });
+
+  check(`All core skills obey playbook budget (<= ${MAX_PLAYBOOK_WORDS} words)`, () => {
+    for (const s of allLoadedSkills) {
+      const pbWords = countWords(s.playbook);
+      assert(
+        pbWords <= MAX_PLAYBOOK_WORDS,
+        `Skill '${s.id}' playbook exceeds ${MAX_PLAYBOOK_WORDS} words (${pbWords} words)`
+      );
+    }
+  });
+
+  check('Skill loader gracefully handles malformed custom SKILL.md without throwing', () => {
+    const tempBadDir = path.join(DEFAULT_SKILLS_DIR, 'custom', 'temp-invalid-test');
+    if (!fs.existsSync(tempBadDir)) fs.mkdirSync(tempBadDir, { recursive: true });
+    const tempBadFile = path.join(tempBadDir, 'SKILL.md');
+    fs.writeFileSync(tempBadFile, 'Not valid frontmatter at all :::: {{}}', 'utf-8');
+    try {
+      clearSkillCache();
+      const countBefore = allLoadedSkills.length;
+      const countWithInvalid = loadAllSkills().length;
+      assert(countWithInvalid === countBefore, 'Invalid skill was safely ignored');
+    } finally {
+      if (fs.existsSync(tempBadDir)) fs.rmSync(tempBadDir, { recursive: true, force: true });
+      clearSkillCache();
+    }
+  });
+
+  // 23. 10-Intent Accuracy Matrix
+  console.log('\nTest 23: 10-Intent Accuracy Matrix');
+  const intentMatrix: { intent: string; expectedSkill: string }[] = [
+    {
+      intent: 'starting a new chronicle, introduce the setting and establish our starting characters',
+      expectedSkill: 'session-bootstrap',
+    },
+    {
+      intent: "plotting to poison Lord Frey's wine at the feast and framing the maester",
+      expectedSkill: 'court-intrigue',
+    },
+    {
+      intent: 'holding peace parley with the ironborn envoys to negotiate a sacred alliance treaty',
+      expectedSkill: 'diplomacy-and-oaths',
+    },
+    {
+      intent: 'leading the vanguard in an open battlefield skirmish against the rebel army',
+      expectedSkill: 'war-and-reckoning',
+    },
+    {
+      intent: 'arranging a dynastic betrothal and calculating heir claims to the ancestral seat',
+      expectedSkill: 'dynasty-and-succession',
+    },
+    {
+      intent: 'listening to dockside rumors and smallfolk chatter over ale in the local tavern',
+      expectedSkill: 'world-texture-and-tavern',
+    },
+    {
+      intent: 'translating an ancient decaying maester scroll detailing valyrian steel forging',
+      expectedSkill: 'maester-and-lore',
+    },
+    {
+      intent: 'recap the scene consequences, record character deaths, and update the chronicle timeline',
+      expectedSkill: 'post-scene-chronicle',
+    },
+    {
+      intent: "whispering rumors in the queen's solar about the treasurer's embezzlement",
+      expectedSkill: 'court-intrigue',
+    },
+    {
+      intent: 'ordering a siege assault against the gatehouse with battering rams and archers',
+      expectedSkill: 'war-and-reckoning',
+    },
+  ];
+
+  for (const item of intentMatrix) {
+    check(`Intent routing matches '${item.expectedSkill}': "${item.intent.slice(0, 45)}..."`, () => {
+      const res = routeSkill(storage, { intent: item.intent, autoBrief: false });
+      assert(res.success === true, 'routeSkill returned success');
+      assert(
+        res.primarySkill.id === item.expectedSkill,
+        `Expected ${item.expectedSkill}, but got ${res.primarySkill.id} (score ${res.routingTrace.score})`
+      );
+    });
+  }
+
+  // 24. Direct @id Override
+  console.log('\nTest 24: Direct @id Override');
+  check('Direct @id override routes with score 1000 and suppresses secondary blend', () => {
+    const overrideRes = routeSkill(storage, {
+      intent: '@maester-and-lore examine the rusted dagger found in the tower',
+      autoBrief: false,
+    });
+    assert(overrideRes.success === true, 'routeSkill succeeded');
+    assert(overrideRes.primarySkill.id === 'maester-and-lore', 'Selected @maester-and-lore');
+    assert(overrideRes.routingTrace.score === 1000, `Score must be 1000 (was ${overrideRes.routingTrace.score})`);
+    assert(overrideRes.secondaryBlend === undefined, 'Secondary blend suppressed on direct override');
+  });
+
+  // 25. Live World-State Boost + Secondary Blend
+  console.log('\nTest 25: Live World-State Boost + Secondary Blend');
+  addRelationship(storage, {
+    fromType: 'character',
+    fromId: charAliceId,
+    toType: 'character',
+    toId: charBobId,
+    type: 'rival',
+    sentiment: -25,
+  });
+
+  check('Live world-state activates boosts and blends runner-up when within score threshold', () => {
+    const blendRes = routeSkill(storage, {
+      intent: 'parley to negotiate an alliance treaty with secret leverage',
+      characterIds: [charAliceId, charBobId],
+      autoBrief: false,
+      includeSecondary: true,
+    });
+
+    assert(blendRes.success === true, 'routeSkill succeeded');
+    assert(blendRes.primarySkill.id === 'diplomacy-and-oaths', `Expected primary diplomacy-and-oaths, got ${blendRes.primarySkill.id}`);
+    assert(blendRes.secondaryBlend !== undefined, 'secondaryBlend must be defined');
+    assert(blendRes.secondaryBlend?.id === 'court-intrigue', `Expected blended court-intrigue, got ${blendRes.secondaryBlend?.id}`);
+    assert(
+      blendRes.secondaryBlend!.directives.length > 0 && blendRes.secondaryBlend!.directives.length <= 3,
+      `Secondary directives must be 1-3 entries (got ${blendRes.secondaryBlend?.directives.length})`
+    );
+    assert(blendRes.routingTrace.worldStateBoosts.length > 0, 'World state boosts recorded in trace');
+  });
+
+  // 26. Auto-Prefetch Chaining
+  console.log('\nTest 26: Auto-Prefetch Chaining');
+  check('routeSkill with autoBrief: true prefetches sceneBriefing and protects against double-fetching', () => {
+    const prefetchRes = routeSkill(storage, {
+      intent: 'confronting Lord Bob in the solar about his embezzlement and treason',
+      characterIds: [charAliceId, charBobId],
+      autoBrief: true,
+    });
+
+    assert(prefetchRes.success === true, 'routeSkill succeeded');
+    assert(prefetchRes.primarySkill.id === 'court-intrigue', `Expected court-intrigue, got ${prefetchRes.primarySkill.id}`);
+    assert(prefetchRes.prefetchedContext !== undefined, 'prefetchedContext is attached');
+    assert(prefetchRes.prefetchedContext?.sceneBriefing !== undefined, 'sceneBriefing is prefetched');
+    assert(prefetchRes.prefetchedContext?.sceneBriefing.intrigueMatrix !== undefined, 'intrigueMatrix is inside prefetched sceneBriefing');
+    assert(prefetchRes.prefetchNotice !== undefined, 'prefetchNotice is defined');
+    assert(prefetchRes.prefetchNotice!.includes('ALREADY attached'), 'prefetchNotice warns against double-fetching');
+    assert(
+      !prefetchRes.remainingRecommendedTools.includes('get_scene_briefing'),
+      'get_scene_briefing was safely removed from remainingRecommendedTools'
+    );
+  });
+
+  // 27. Custom Campaign Scoping
+  console.log('\nTest 27: Custom Campaign Scoping');
+  const customSkillDir = path.join(DEFAULT_SKILLS_DIR, 'custom', 'test-valyria-prophecy');
+  if (!fs.existsSync(customSkillDir)) fs.mkdirSync(customSkillDir, { recursive: true });
+  const customSkillPath = path.join(customSkillDir, 'SKILL.md');
+
+  const customSkillContent = `---
+id: test-valyria-prophecy
+name: Valyrian Prophecy & Omens
+description: Interpreting blood prophecies and doom visions for Valyrian dragonlords.
+priority: 9
+triggers:
+  - "dragon dream"
+  - "doom prophecy"
+  - "blood magic"
+campaignScope:
+  - "Valyria"
+  - "campaign-valyria-test"
+toolSequence:
+  - get_scene_briefing
+  - upsert_tome
+---
+
+## Mode Directives
+* Treat dreams as literal or figurative doom omens.
+* Involve ancient high Valyrian glyphs.
+* Herald the coming cataclysm.
+
+## Voice & Flavor Rules
+* Smelling of sulfur, ash, and obsidian.
+
+## Mandatory State Updates
+* Record all ominous prophecies in tomes.
+`;
+
+  try {
+    fs.writeFileSync(customSkillPath, customSkillContent, 'utf-8');
+    clearSkillCache();
+
+    check('Custom skill is hidden from listSkills in standard/unmatched campaigns', () => {
+      const skillsInBritannia = listSkills(storage).skills;
+      const found = skillsInBritannia.find((s) => s.id === 'test-valyria-prophecy');
+      assert(found === undefined, 'test-valyria-prophecy must be hidden outside Valyria');
+    });
+
+    check('Custom skill is visible with includeAllCampaigns: true', () => {
+      const allSkills = listSkills(storage, { includeAllCampaigns: true }).skills;
+      const found = allSkills.find((s) => s.id === 'test-valyria-prophecy');
+      assert(found !== undefined, 'test-valyria-prophecy must appear with includeAllCampaigns: true');
+    });
+
+    const valyriaRes = createCampaign(storage, 'Valyria');
+    const valyriaCampId = valyriaRes.campaign.id;
+
+    check('Custom skill is visible in matching campaign scope', () => {
+      const valyriaSkills = listSkills(storage, { campaignId: valyriaCampId }).skills;
+      const found = valyriaSkills.find((s) => s.id === 'test-valyria-prophecy');
+      assert(found !== undefined, 'test-valyria-prophecy must be visible in Valyria campaign');
+    });
+
+    check('Custom skill routes successfully within matching campaign scope', () => {
+      const routed = routeSkill(storage, {
+        intent: 'interpreting an ominous dragon dream and doom prophecy',
+        campaignId: valyriaCampId,
+        autoBrief: false,
+      });
+      assert(routed.success === true, 'routeSkill succeeded');
+      assert(routed.primarySkill.id === 'test-valyria-prophecy', `Expected test-valyria-prophecy, got ${routed.primarySkill.id}`);
+    });
+
+    check('Custom skill is NOT routed when outside matching campaign scope', () => {
+      const routedOutside = routeSkill(storage, {
+        intent: 'interpreting an ominous dragon dream and doom prophecy',
+        autoBrief: false,
+      });
+      assert(routedOutside.success === true, 'routeSkill succeeded');
+      assert(
+        routedOutside.primarySkill.id !== 'test-valyria-prophecy',
+        'Scoped skill must not route outside its campaign'
+      );
+    });
+  } finally {
+    if (fs.existsSync(customSkillDir)) {
+      fs.rmSync(customSkillDir, { recursive: true, force: true });
+    }
+    clearSkillCache();
+  }
 
   // Clean up scratch directory
   if (fs.existsSync(scratchDataDir)) {

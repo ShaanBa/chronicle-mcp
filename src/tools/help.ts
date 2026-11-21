@@ -7,6 +7,29 @@ export interface CommandHelp {
 }
 
 export const CHRONICLE_COMMANDS: CommandHelp[] = [
+  // RP Skills & Routing
+  {
+    name: 'route_skill',
+    category: 'Skills & Routing',
+    summary: 'Skill Router: dynamically select and prefetch roleplay playbooks based on user intent.',
+    description: 'The primary entry point for any roleplay scene. Dynamically matches freeform intent to specialized skill cartridges (court-intrigue, diplomacy-and-oaths, war-and-reckoning, etc.), boosts matches with live world state, chains scene briefings or realm recaps, and returns directives plus prefetched context in a single round-trip.',
+    usageExample: 'chronicle/route_skill { intent: "Hold a tense council meeting with Raymund", characterIds: ["Raymund"], autoBrief: true }',
+  },
+  {
+    name: 'list_skills',
+    category: 'Skills & Routing',
+    summary: 'List all registered roleplay skill playbooks and triggers.',
+    description: 'Lists all available core and custom skills with their primary triggers, autoPrefetch behavior, and campaign scopes.',
+    usageExample: 'chronicle/list_skills {}',
+  },
+  {
+    name: 'get_skill',
+    category: 'Skills & Routing',
+    summary: 'Retrieve the complete playbook and tool sequence for a skill.',
+    description: 'Returns the full markdown directives, voice and flavor rules, and mandatory state updates for a specific skill cartridge.',
+    usageExample: 'chronicle/get_skill { skillId: "court-intrigue" }',
+  },
+
   // Campaign Tools
   {
     name: 'list_campaigns',

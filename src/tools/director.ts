@@ -4,6 +4,13 @@ import { z } from 'zod';
 
 export { SceneBriefingInputSchema };
 
+export function buildSceneBriefing(
+  storage: Storage,
+  input: z.infer<typeof SceneBriefingInputSchema>
+) {
+  return getSceneBriefing(storage, input);
+}
+
 export function getSceneBriefing(
   storage: Storage,
   input: z.infer<typeof SceneBriefingInputSchema>

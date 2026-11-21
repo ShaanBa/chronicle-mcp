@@ -1,6 +1,11 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 
 import { Storage } from './storage.js';
 import {
@@ -64,6 +69,15 @@ import {
   getSceneBriefing,
 } from './tools/director.js';
 import {
+  routeSkill,
+  listSkills,
+  getSkill,
+} from './tools/skills.js';
+import {
+  loadAllSkills,
+  getSkillById,
+} from './skills/loader.js';
+import {
   listCommands,
 } from './tools/help.js';
 import {
@@ -77,10 +91,13 @@ import {
   SecretSchema,
   CampaignPulseUpdateSchema,
   SceneBriefingInputSchema,
+  RouteSkillInputSchema,
+  GetSkillInputSchema,
+  ListSkillsInputSchema,
 } from './schema.js';
 
-export function createChronicleServer(): Server {
-  const storage = new Storage();
+export function createChronicleServer(storageInstance?: Storage): Server {
+  const storage = storageInstance || new Storage();
 
   const server = new Server(
     {
@@ -90,13 +107,139 @@ export function createChronicleServer(): Server {
     {
       capabilities: {
         tools: {},
+        prompts: {},
       },
     }
   );
 
+  // MCP Prompts Handler (ListPromptsRequestSchema)
+  server.setRequestHandler(ListPromptsRequestSchema, async () => {
+    const skills = loadAllSkills();
+    return {
+      prompts: skills.map((s) => ({
+        name: s.id,
+        description: s.description,
+        arguments: [
+          {
+            name: 'context',
+            description: 'Optional scene details, intent, or participating character names',
+            required: false,
+          },
+        ],
+      })),
+    };
+  });
+
+  // MCP Prompts Handler (GetPromptRequestSchema)
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    const skillId = request.params.name;
+    const skill = getSkillById(skillId);
+    if (!skill) {
+      throw new Error(`Prompt skill '${skillId}' not found.`);
+    }
+    const contextArg = request.params.arguments?.context || '';
+    const userPrompt = [
+      `# Active Roleplay Skill: ${skill.name} (${skill.id})`,
+      `\n${skill.description}`,
+      contextArg ? `\n## Scene Context & User Input:\n${contextArg}` : '',
+      `\n## Recommended Tool Sequence:\n${skill.toolSequence.map((t) => `* \`${t}\``).join('\n')}`,
+      `\n---\n${skill.playbook}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    return {
+      description: skill.description,
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: userPrompt,
+          },
+        },
+      ],
+    };
+  });
+
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
       tools: [
+        // RP Skill Router Tools
+        {
+          name: 'route_skill',
+          description:
+            'Dynamically routes intent to the optimal roleplay skill cartridge, scores triggers with live campaign state boosts, and returns directives plus prefetched context in a single round-trip.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              intent: {
+                type: 'string',
+                description:
+                  'Freeform intent or prompt (e.g. "Hold a tense council meeting with Raymund and Saera", "@court-intrigue")',
+              },
+              characterIds: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Cast characters in the scene',
+              },
+              locationName: {
+                type: 'string',
+                description: 'Location of the scene (e.g. "The Maidenpool Salt Cellar")',
+              },
+              povCharacterId: {
+                type: 'string',
+                description: 'Focal POV character for anti-metagaming checks',
+              },
+              autoBrief: {
+                type: 'boolean',
+                description: 'Whether to auto-prefetch scene_briefing or realm_recap (default true)',
+              },
+              includeSecondary: {
+                type: 'boolean',
+                description: 'Whether to attach secondary skill directives if runner-up is close (default true)',
+              },
+              campaignId: {
+                type: 'string',
+                description: 'Optional campaign override',
+              },
+            },
+            required: ['intent'],
+          },
+        },
+        {
+          name: 'list_skills',
+          description:
+            'List all registered roleplay skill playbooks with key triggers, auto-prefetch behavior, and campaign scopes.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              includeAllCampaigns: {
+                type: 'boolean',
+                description: 'Whether to include custom skills scoped to other campaigns (default false)',
+              },
+              campaignId: {
+                type: 'string',
+                description: 'Optional campaign scope',
+              },
+            },
+          },
+        },
+        {
+          name: 'get_skill',
+          description:
+            'Retrieve the full playbook, tool sequence, and directives for a specific roleplay skill by ID.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              skillId: {
+                type: 'string',
+                description: 'Skill handle (e.g. "court-intrigue", "war-and-reckoning")',
+              },
+            },
+            required: ['skillId'],
+          },
+        },
         // Campaign Tools
         {
           name: 'list_campaigns',
@@ -956,6 +1099,23 @@ export function createChronicleServer(): Server {
         case 'get_character_knowledge': {
           const { characterId, campaignId } = args as { characterId: string; campaignId?: string };
           const res = getCharacterKnowledge(storage, { characterId, campaignId });
+          return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
+        }
+
+        // RP Skill Router Tools
+        case 'route_skill': {
+          const parsed = RouteSkillInputSchema.parse(args);
+          const res = routeSkill(storage, parsed);
+          return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
+        }
+        case 'list_skills': {
+          const parsed = ListSkillsInputSchema.parse(args || {});
+          const res = listSkills(storage, parsed);
+          return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
+        }
+        case 'get_skill': {
+          const parsed = GetSkillInputSchema.parse(args);
+          const res = getSkill(storage, parsed);
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
 

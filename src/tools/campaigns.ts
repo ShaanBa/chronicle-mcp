@@ -1,5 +1,10 @@
 import { Storage, resolveCharacterRef } from '../storage.js';
 import { RealmMood } from '../schema.js';
+import { getRealmRecap } from './search.js';
+
+export function buildRealmRecap(storage: Storage, campaignId?: string) {
+  return getRealmRecap(storage, campaignId);
+}
 
 export function listCampaigns(storage: Storage) {
   const activeId = storage.activeCampaignId;

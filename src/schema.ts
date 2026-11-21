@@ -403,3 +403,54 @@ export const SceneBriefingInputSchema = z.object({
   includeOmniscientSecrets: z.boolean().default(true),
   campaignId: z.string().optional(),
 });
+
+// RP Skill Router Types & Schemas
+
+export type SkillAutoPrefetch = 'scene_briefing' | 'realm_recap' | 'public_archive_hint' | 'none';
+
+export const SkillFrontmatterSchema = z.object({
+  id: z.string().min(1, 'Skill id is required'),
+  name: z.string().min(1, 'Skill name is required'),
+  description: z.string().min(1, 'Skill description is required'),
+  triggers: z.array(z.string()).default([]),
+  antiTriggers: z.array(z.string()).default([]),
+  autoPrefetch: z.enum(['scene_briefing', 'realm_recap', 'public_archive_hint', 'none']).default('none'),
+  priority: z.number().default(0),
+  campaignScope: z.array(z.string()).optional(),
+  toolSequence: z.array(z.string()).default([]),
+});
+
+export interface SkillDefinition {
+  id: string;
+  name: string;
+  description: string;
+  triggers: string[];
+  antiTriggers: string[];
+  autoPrefetch: SkillAutoPrefetch;
+  priority: number;
+  campaignScope?: string[];
+  toolSequence: string[];
+  playbook: string;
+  filePath: string;
+  isCustom: boolean;
+  mtimeMs: number;
+}
+
+export const RouteSkillInputSchema = z.object({
+  intent: z.string().min(1, 'Intent description is required'),
+  characterIds: z.array(z.string()).optional(),
+  locationName: z.string().optional(),
+  povCharacterId: z.string().optional(),
+  autoBrief: z.boolean().default(true),
+  includeSecondary: z.boolean().default(true),
+  campaignId: z.string().optional(),
+});
+
+export const GetSkillInputSchema = z.object({
+  skillId: z.string().min(1, 'skillId is required'),
+});
+
+export const ListSkillsInputSchema = z.object({
+  includeAllCampaigns: z.boolean().default(false),
+  campaignId: z.string().optional(),
+});

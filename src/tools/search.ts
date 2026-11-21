@@ -242,8 +242,10 @@ export function searchChronicle(
   return { success: true, results };
 }
 
-export function getRealmRecap(storage: Storage) {
-  const activeCampaign = storage.getActiveCampaign();
+export function getRealmRecap(storage: Storage, campaignId?: string) {
+  const activeCampaign = campaignId
+    ? (storage.campaigns.find((c) => c.id === campaignId) || storage.getActiveCampaign())
+    : storage.getActiveCampaign();
   const activeId = activeCampaign.id;
 
   // 1. Campaign Pulse block
@@ -357,3 +359,5 @@ export function getRealmRecap(storage: Storage) {
     },
   };
 }
+
+export const buildRealmRecap = getRealmRecap;
