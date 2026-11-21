@@ -114,7 +114,16 @@ export function createChronicleServer(storageInstance?: Storage): Server {
 
   // MCP Prompts Handler (ListPromptsRequestSchema)
   server.setRequestHandler(ListPromptsRequestSchema, async () => {
-    const skills = loadAllSkills();
+    const activeCamp = storage.getActiveCampaign();
+    const skills = loadAllSkills().filter((s) => {
+      if (!s.campaignScope || s.campaignScope.length === 0) return true;
+      const campIdLower = activeCamp.id.toLowerCase();
+      const campNameLower = activeCamp.name.toLowerCase();
+      return s.campaignScope.some((scope) => {
+        const scopeLower = scope.toLowerCase();
+        return scopeLower === campIdLower || scopeLower === campNameLower;
+      });
+    });
     return {
       prompts: skills.map((s) => ({
         name: s.id,
@@ -373,18 +382,56 @@ export function createChronicleServer(storageInstance?: Storage): Server {
               character: {
                 type: 'object',
                 properties: {
-                  id: { type: 'string' },
-                  name: { type: 'string' },
-                  title: { type: 'string' },
-                  house: { type: 'string' },
-                  culture: { type: 'string' },
-                  religion: { type: 'string' },
-                  born: { type: 'string' },
-                  died: { type: 'string' },
-                  status: { type: 'string' },
-                  summary: { type: 'string' },
-                  notes: { type: 'array', items: { type: 'string' } },
+                  id: { type: 'string', description: 'Unique ID for updates; omit for new character' },
+                  name: { type: 'string', description: 'Canonical character name' },
+                  house: { type: 'string', description: 'Noble house name or ID' },
+                  status: { type: 'string', enum: ['alive', 'dead', 'unknown'] },
+                  epithet: { type: 'string', description: 'Sobriquet or moniker, e.g. "the Young Dragon"' },
+                  titles: { type: 'array', items: { type: 'string' }, description: 'Current feudal titles & offices' },
+                  birthYear: { type: 'number', description: 'Numeric birth year for age calculation' },
+                  deathYear: { type: 'number', description: 'Numeric death year if deceased' },
+                  causeOfDeath: { type: 'string', description: 'Cause or battle where character died' },
+                  culture: { type: 'string', description: 'Cultural heritage, e.g. "Riverman", "Valyrian"' },
+                  religion: { type: 'string', description: 'Faith, e.g. "Faith of the Seven"' },
+                  traits: { type: 'array', items: { type: 'string' }, description: 'Personality traits, e.g. ["Arbitrary", "Deceitful"]' },
+                  speechTells: { type: 'string', description: 'Distinctive voice, dialect, or speech habit' },
+                  currentObsession: { type: 'string', description: 'Immediate personal fixation or desire' },
+                  face: { type: 'string', description: 'Physical appearance and sensory details' },
+                  voice: { type: 'string', description: 'Tone and cadence of speech' },
+                  coreDrive: { type: 'string', description: 'Fundamental motivation' },
+                  flaw: { type: 'string', description: 'Fatal vulnerability or character defect' },
+                  modernAnalogue: { type: 'string', description: 'Modern pop-culture or historical archetype' },
+                  relationships: { type: 'string', description: 'Summary notes on key relationships' },
+                  trajectory: { type: 'string', description: 'Anticipated narrative arc' },
+                  formativeScars: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        eventId: { type: 'string' },
+                        summary: { type: 'string' },
+                      },
+                      required: ['summary'],
+                    },
+                    description: 'Physical or psychological trauma scars',
+                  },
+                  activeGrudges: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        targetId: { type: 'string', description: 'Target character or house ID/name' },
+                        reason: { type: 'string', description: 'Specific slight unforgotten' },
+                        date: { type: 'string' },
+                        intensity: { type: 'string', enum: ['petty', 'bitter', 'blood_oath', 'mortal'] },
+                      },
+                      required: ['targetId', 'reason'],
+                    },
+                    description: 'Active unforgiven grievances and vendettas',
+                  },
                   tags: { type: 'array', items: { type: 'string' } },
+                  note: { type: 'string', description: 'Optional milestone note to append to historyLog' },
+                  date: { type: 'string', description: 'In-game date for milestone note' },
                 },
                 required: ['name'],
               },
@@ -444,12 +491,24 @@ export function createChronicleServer(storageInstance?: Storage): Server {
               entry: {
                 type: 'object',
                 properties: {
-                  date: { type: 'string' },
-                  title: { type: 'string' },
+                  title: { type: 'string', description: 'Title of the event' },
+                  date: { type: 'string', description: 'Display date, e.g. "289 AC, Late Autumn"' },
+                  sortYear: { type: 'number', description: 'Numeric year anchor for chronological sorting' },
                   tags: { type: 'array', items: { type: 'string' } },
-                  narrative: { type: 'string' },
-                  mechanicalOutcome: { type: 'string' },
-                  involvedCharacters: { type: 'array', items: { type: 'string' } },
+                  narrative: { type: 'string', description: 'Full narrative description of the event' },
+                  mechanicalOutcome: {
+                    type: 'object',
+                    properties: {
+                      summary: { type: 'string', description: 'Mechanical outcome summary' },
+                      goldDelta: { type: 'number' },
+                      prestigeDelta: { type: 'number' },
+                      pietyDelta: { type: 'number' },
+                      territoryChange: { type: 'string' },
+                      casualties: { type: 'string' },
+                    },
+                    required: ['summary'],
+                    description: 'Structured mechanical consequences and stat deltas',
+                  },
                 },
                 required: ['title', 'narrative'],
               },
@@ -485,7 +544,7 @@ export function createChronicleServer(storageInstance?: Storage): Server {
         {
           name: 'list_tomes',
           description:
-            'List lore tomes in the active campaign with optional category or tag filter.',
+            'List lore tomes in the active campaign with optional category, tag, reliability, or sourceType filter.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -494,6 +553,14 @@ export function createChronicleServer(storageInstance?: Storage): Server {
                 properties: {
                   category: { type: 'string' },
                   tag: { type: 'string' },
+                  sourceType: {
+                    type: 'string',
+                    enum: ['chronicle', 'letter', 'ballad', 'rumor', 'prophecy', 'decree', 'epitaph', 'treatise', 'mod_flavor'],
+                  },
+                  reliability: {
+                    type: 'string',
+                    enum: ['true', 'biased', 'propaganda', 'myth', 'forged'],
+                  },
                 },
               },
             },
@@ -531,10 +598,24 @@ export function createChronicleServer(storageInstance?: Storage): Server {
               tome: {
                 type: 'object',
                 properties: {
-                  id: { type: 'string' },
+                  id: { type: 'string', description: 'Unique ID for updates; omit for new tome' },
                   title: { type: 'string' },
                   category: { type: 'string' },
                   content: { type: 'string' },
+                  sourceType: {
+                    type: 'string',
+                    enum: ['chronicle', 'letter', 'ballad', 'rumor', 'prophecy', 'decree', 'epitaph', 'treatise', 'mod_flavor'],
+                    description: 'Physical source type of the document',
+                  },
+                  inWorldAuthor: { type: 'string', description: 'In-world author or maester who recorded the text' },
+                  inGameDate: { type: 'string', description: 'In-game recording date, e.g. "289 AC"' },
+                  reliability: {
+                    type: 'string',
+                    enum: ['true', 'biased', 'propaganda', 'myth', 'forged'],
+                    description: 'Epistemic reliability tier of the text',
+                  },
+                  relatedCharacterIds: { type: 'array', items: { type: 'string' }, description: 'Characters referenced' },
+                  relatedEventIds: { type: 'array', items: { type: 'string' }, description: 'Timeline events referenced' },
                   tags: { type: 'array', items: { type: 'string' } },
                 },
                 required: ['title', 'content'],
@@ -563,12 +644,19 @@ export function createChronicleServer(storageInstance?: Storage): Server {
           inputSchema: {
             type: 'object',
             properties: {
-              fromType: { type: 'string' },
-              fromId: { type: 'string' },
-              toType: { type: 'string' },
-              toId: { type: 'string' },
-              type: { type: 'string' },
+              fromType: { type: 'string', enum: ['character', 'house'] },
+              fromId: { type: 'string', description: 'Source character or house ID/name' },
+              toType: { type: 'string', enum: ['character', 'house'] },
+              toId: { type: 'string', description: 'Target character or house ID/name' },
+              type: {
+                type: 'string',
+                enum: ['ally', 'rival', 'spouse', 'parent', 'child', 'sibling', 'liege', 'vassal', 'enemy', 'debtor', 'creditor', 'other'],
+              },
               note: { type: 'string' },
+              isSecret: { type: 'boolean', description: 'Set true if relationship is hidden from public record (Maester mode)' },
+              sentiment: { type: 'number', minimum: -100, maximum: 100, description: 'Personal emotional sentiment (-100 to +100)' },
+              publicFacade: { type: 'string', description: 'Publicly acknowledged cover story of relationship' },
+              oneWay: { type: 'boolean', description: 'If true, do not create reciprocal inverse edge' },
             },
             required: ['fromType', 'fromId', 'toType', 'toId', 'type'],
           },
@@ -580,8 +668,9 @@ export function createChronicleServer(storageInstance?: Storage): Server {
           inputSchema: {
             type: 'object',
             properties: {
-              entityType: { type: 'string' },
+              entityType: { type: 'string', enum: ['character', 'house'] },
               entityId: { type: 'string' },
+              includeSecrets: { type: 'boolean', description: 'Set true to reveal secret edges (GM omniscience)' },
             },
             required: ['entityType', 'entityId'],
           },
@@ -635,10 +724,12 @@ export function createChronicleServer(storageInstance?: Storage): Server {
               thread: {
                 type: 'object',
                 properties: {
-                  id: { type: 'string' },
+                  id: { type: 'string', description: 'Unique ID for updates; omit for new thread' },
                   title: { type: 'string' },
                   summary: { type: 'string' },
-                  status: { type: 'string' },
+                  status: { type: 'string', enum: ['open', 'resolved', 'dormant'] },
+                  relatedCharacterIds: { type: 'array', items: { type: 'string' }, description: 'Characters involved in plot thread' },
+                  relatedEventIds: { type: 'array', items: { type: 'string' }, description: 'Linked timeline events' },
                   tags: { type: 'array', items: { type: 'string' } },
                 },
                 required: ['title', 'summary'],
@@ -719,13 +810,22 @@ export function createChronicleServer(storageInstance?: Storage): Server {
               house: {
                 type: 'object',
                 properties: {
-                  id: { type: 'string' },
-                  name: { type: 'string' },
-                  motto: { type: 'string' },
-                  coatOfArms: { type: 'string' },
-                  summary: { type: 'string' },
-                  notes: { type: 'array', items: { type: 'string' } },
+                  id: { type: 'string', description: 'Unique ID for updates; omit for new house' },
+                  name: { type: 'string', description: 'Noble house name' },
+                  headCharacterId: { type: 'string', description: 'Head of house character ID/name' },
+                  status: { type: 'string', enum: ['ruling', 'vassal', 'extinct', 'rival', 'unknown'] },
+                  holdings: { type: 'array', items: { type: 'string' }, description: 'Castles, towns, and fiefs' },
+                  prestige: { type: 'number', description: 'Dynastic prestige score' },
+                  words: { type: 'string', description: 'House motto / ancestral words' },
+                  sigil: { type: 'string', description: 'Coat of arms / heraldic device' },
+                  seat: { type: 'string', description: 'Ancestral castle / seat of power' },
+                  culture: { type: 'string', description: 'Cultural origins' },
+                  religion: { type: 'string', description: 'Religious affiliation' },
+                  reputation: { type: 'string', description: 'Reputation across the realm' },
+                  cadetOfHouseId: { type: 'string', description: 'Parent dynasty if cadet branch' },
                   tags: { type: 'array', items: { type: 'string' } },
+                  note: { type: 'string', description: 'Optional milestone note to append to historyLog' },
+                  date: { type: 'string', description: 'In-game date for milestone note' },
                 },
                 required: ['name'],
               },
@@ -1174,8 +1274,8 @@ async function main() {
   console.error('[chronicle-mcp] Server running on stdio');
 }
 
-// Run stdio server if executed directly
-if (process.argv[1] && process.argv[1].endsWith('index.js')) {
+// Run stdio server if executed directly (supports both compiled dist/index.js and tsx src/index.ts)
+if (process.argv[1] && /index\.(js|ts)$/.test(process.argv[1])) {
   main().catch((err) => {
     console.error('[chronicle-mcp] Fatal error in main():', err);
     process.exit(1);

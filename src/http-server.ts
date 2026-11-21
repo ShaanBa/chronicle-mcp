@@ -2,6 +2,7 @@ import http, { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createChronicleServer } from './index.js';
+import { Storage } from './storage.js';
 
 // Environment variable configuration for Port and Authentication
 export const PORT_ENV_VAR = 'CHRONICLE_HTTP_PORT';
@@ -21,6 +22,18 @@ if (!AUTH_TOKEN) {
 
 const OAUTH_CLIENT_ID = process.env.CHRONICLE_OAUTH_CLIENT_ID || 'chronicle-gemini';
 const OAUTH_CLIENT_SECRET = process.env.CHRONICLE_OAUTH_CLIENT_SECRET || AUTH_TOKEN;
+
+// Shared Storage singleton across all HTTP sessions to avoid clobbering and listener leaks
+const sharedStorage = new Storage();
+
+// In-memory OAuth authorization codes with TTL and single-use invalidation
+interface AuthCodeEntry {
+  clientId: string;
+  redirectUri: string;
+  expiresAt: number;
+  codeChallenge?: string;
+}
+const authCodes = new Map<string, AuthCodeEntry>();
 
 // Session transports map
 const transports: Record<string, StreamableHTTPServerTransport> = {};
@@ -113,6 +126,8 @@ const server = http.createServer(async (req: IncomingMessage, res: ServerRespons
         clientSecret = credentials[1] || '';
       }
 
+      let codeParam = '';
+
       // Check form or JSON body
       const contentType = req.headers['content-type'] || '';
       if (contentType.includes('application/json')) {
@@ -121,20 +136,76 @@ const server = http.createServer(async (req: IncomingMessage, res: ServerRespons
           clientId = clientId || json.client_id || '';
           clientSecret = clientSecret || json.client_secret || '';
           grantType = json.grant_type || '';
+          codeParam = json.code || '';
         } catch {}
       } else {
         const params = new URLSearchParams(rawBody);
         clientId = clientId || params.get('client_id') || '';
         clientSecret = clientSecret || params.get('client_secret') || '';
         grantType = params.get('grant_type') || '';
+        codeParam = params.get('code') || '';
       }
 
-      // Allow authorization_code or client_credentials with valid credentials (or matching client ID)
-      if (
-        (clientId === OAUTH_CLIENT_ID && clientSecret === OAUTH_CLIENT_SECRET) ||
-        grantType === 'authorization_code' ||
-        grantType === 'client_credentials'
-      ) {
+      // Handle client_credentials grant: STRICT check using && (never ||)
+      if (grantType === 'client_credentials') {
+        if (clientId === OAUTH_CLIENT_ID && clientSecret === OAUTH_CLIENT_SECRET) {
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(
+            JSON.stringify({
+              access_token: AUTH_TOKEN,
+              token_type: 'bearer',
+              expires_in: 3600,
+            })
+          );
+          return;
+        }
+
+        res.writeHead(401, {
+          'Content-Type': 'application/json',
+          'WWW-Authenticate': `Bearer realm="chronicle"`,
+        });
+        res.end(JSON.stringify({ error: 'invalid_client', error_description: 'Invalid client credentials' }));
+        return;
+      }
+
+      // Handle authorization_code grant: Verify single-use, non-expired authorization code
+      if (grantType === 'authorization_code') {
+        if (!codeParam) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'invalid_request', error_description: 'Missing authorization code' }));
+          return;
+        }
+
+        const entry = authCodes.get(codeParam);
+        if (!entry || entry.expiresAt < Date.now()) {
+          if (entry) authCodes.delete(codeParam);
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'invalid_grant', error_description: 'Invalid or expired authorization code' }));
+          return;
+        }
+
+        // Single-use: Consume and delete immediately
+        authCodes.delete(codeParam);
+
+        if (clientId && clientId !== entry.clientId) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'invalid_client', error_description: 'Client ID mismatch for authorization code' }));
+          return;
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(
+          JSON.stringify({
+            access_token: AUTH_TOKEN,
+            token_type: 'bearer',
+            expires_in: 3600,
+          })
+        );
+        return;
+      }
+
+      // Fallback: If client presents valid static credentials directly
+      if (clientId === OAUTH_CLIENT_ID && clientSecret === OAUTH_CLIENT_SECRET) {
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
         res.end(
           JSON.stringify({
@@ -150,7 +221,7 @@ const server = http.createServer(async (req: IncomingMessage, res: ServerRespons
         'Content-Type': 'application/json',
         'WWW-Authenticate': `Bearer realm="chronicle"`,
       });
-      res.end(JSON.stringify({ error: 'invalid_client', error_description: 'Invalid client credentials' }));
+      res.end(JSON.stringify({ error: 'invalid_client', error_description: 'Invalid client credentials or unsupported grant_type' }));
       return;
     } catch (err: any) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -160,7 +231,18 @@ const server = http.createServer(async (req: IncomingMessage, res: ServerRespons
   }
 
   // OAuth Dynamic Client Registration (RFC 7591)
+  // Protected: Never return master tokens or secrets to unauthenticated callers
   if (url.pathname.includes('/register')) {
+    const regAuthHeader = req.headers['authorization'];
+    if (!regAuthHeader || regAuthHeader !== `Bearer ${AUTH_TOKEN}`) {
+      res.writeHead(401, {
+        'Content-Type': 'application/json',
+        'WWW-Authenticate': `Bearer realm="chronicle"`,
+      });
+      res.end(JSON.stringify({ error: 'unauthorized', error_description: 'Client registration requires valid Bearer authentication' }));
+      return;
+    }
+
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
       JSON.stringify({
@@ -175,11 +257,28 @@ const server = http.createServer(async (req: IncomingMessage, res: ServerRespons
 
   // OAuth Authorize Endpoint (/authorize)
   if (url.pathname.includes('/authorize')) {
+    const requestedClientId = url.searchParams.get('client_id');
+    if (requestedClientId && requestedClientId !== OAUTH_CLIENT_ID) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'unauthorized_client', error_description: 'Unknown client_id' }));
+      return;
+    }
+
     const redirectUri = url.searchParams.get('redirect_uri');
     const state = url.searchParams.get('state') || '';
+    const codeChallenge = url.searchParams.get('code_challenge') || undefined;
+
     if (redirectUri) {
+      const code = randomUUID();
+      authCodes.set(code, {
+        clientId: requestedClientId || OAUTH_CLIENT_ID,
+        redirectUri,
+        expiresAt: Date.now() + 5 * 60 * 1000, // 5-minute TTL
+        codeChallenge,
+      });
+
       const targetUrl = new URL(redirectUri);
-      targetUrl.searchParams.set('code', 'chronicle_auth_code');
+      targetUrl.searchParams.set('code', code);
       if (state) targetUrl.searchParams.set('state', state);
       res.writeHead(302, { Location: targetUrl.toString() });
       res.end();
@@ -255,7 +354,7 @@ const server = http.createServer(async (req: IncomingMessage, res: ServerRespons
         }
       };
 
-      const mcpServer = createChronicleServer();
+      const mcpServer = createChronicleServer(sharedStorage);
       await mcpServer.connect(transport);
       await transport.handleRequest(req, res, parsedBody);
       return;

@@ -45,7 +45,7 @@ export interface CharacterGrudge {
   targetId: string;                    // Character or House ID
   reason: string;                      // Specific slight they haven't forgiven
   date?: string;                       // When the slight occurred
-  intensity?: 'petty' | 'bitter' | 'blood_oath';
+  intensity?: 'petty' | 'bitter' | 'blood_oath' | 'mortal';
 }
 
 export interface Character {
@@ -257,7 +257,7 @@ export const CharacterGrudgeSchema = z.object({
   targetId: z.string().min(1, 'Target ID is required'),
   reason: z.string().min(1, 'Grudge reason is required'),
   date: z.string().optional(),
-  intensity: z.enum(['petty', 'bitter', 'blood_oath']).default('bitter'),
+  intensity: z.enum(['petty', 'bitter', 'blood_oath', 'mortal']).default('bitter'),
 });
 
 export const CharacterSchema = z.object({
@@ -265,8 +265,8 @@ export const CharacterSchema = z.object({
   campaignId: z.string().optional(),
   name: z.string().min(1, 'Name is required'),
   house: z.string().optional(),
-  status: z.enum(['alive', 'dead', 'unknown']).default('alive'),
-  tags: z.array(z.string()).default([]),
+  status: z.enum(['alive', 'dead', 'unknown']).optional(),
+  tags: z.array(z.string()).optional(),
   face: z.string().optional(),
   voice: z.string().optional(),
   coreDrive: z.string().optional(),
@@ -276,17 +276,17 @@ export const CharacterSchema = z.object({
   trajectory: z.string().optional(),
   historyLog: z.array(HistoryLogEntrySchema).optional(),
   epithet: z.string().optional(),
-  titles: z.array(z.string()).default([]),
+  titles: z.array(z.string()).optional(),
   birthYear: z.number().optional(),
   deathYear: z.number().optional(),
   causeOfDeath: z.string().optional(),
   culture: z.string().optional(),
   religion: z.string().optional(),
-  traits: z.array(z.string()).default([]),
+  traits: z.array(z.string()).optional(),
   speechTells: z.string().optional(),
   currentObsession: z.string().optional(),
-  formativeScars: z.array(FormativeScarSchema).default([]),
-  activeGrudges: z.array(CharacterGrudgeSchema).default([]),
+  formativeScars: z.array(FormativeScarSchema).optional(),
+  activeGrudges: z.array(CharacterGrudgeSchema).optional(),
   note: z.string().optional(),
   date: z.string().optional(),
 });
@@ -319,13 +319,13 @@ export const TomeSchema = z.object({
   sourceType: z.enum([
     'chronicle', 'letter', 'ballad', 'rumor', 'prophecy',
     'decree', 'epitaph', 'treatise', 'mod_flavor'
-  ]).default('chronicle'),
+  ]).optional(),
   inWorldAuthor: z.string().optional(),
   inGameDate: z.string().optional(),
-  reliability: z.enum(['true', 'biased', 'propaganda', 'myth', 'forged']).default('true'),
-  relatedCharacterIds: z.array(z.string()).default([]),
-  relatedEventIds: z.array(z.string()).default([]),
-  tags: z.array(z.string()).default([]),
+  reliability: z.enum(['true', 'biased', 'propaganda', 'myth', 'forged']).optional(),
+  relatedCharacterIds: z.array(z.string()).optional(),
+  relatedEventIds: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
   content: z.string().min(1, 'Content is required'),
 });
 
@@ -350,11 +350,11 @@ export const ThreadSchema = z.object({
   id: z.string().optional(),
   campaignId: z.string().optional(),
   title: z.string().min(1, 'Title is required'),
-  status: z.enum(['open', 'resolved', 'dormant']).default('open'),
+  status: z.enum(['open', 'resolved', 'dormant']).optional(),
   summary: z.string().min(1, 'Summary is required'),
-  relatedCharacterIds: z.array(z.string()).default([]),
-  relatedEventIds: z.array(z.string()).default([]),
-  tags: z.array(z.string()).default([]),
+  relatedCharacterIds: z.array(z.string()).optional(),
+  relatedEventIds: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
 });
 
 export const HouseSchema = z.object({
@@ -362,10 +362,10 @@ export const HouseSchema = z.object({
   campaignId: z.string().optional(),
   name: z.string().min(1, 'Name is required'),
   headCharacterId: z.string().optional(),
-  status: z.enum(['ruling', 'vassal', 'extinct', 'rival', 'unknown']).default('ruling'),
-  holdings: z.array(z.string()).default([]),
+  status: z.enum(['ruling', 'vassal', 'extinct', 'rival', 'unknown']).optional(),
+  holdings: z.array(z.string()).optional(),
   prestige: z.number().optional(),
-  tags: z.array(z.string()).default([]),
+  tags: z.array(z.string()).optional(),
   historyLog: z.array(HistoryLogEntrySchema).optional(),
   words: z.string().optional(),
   sigil: z.string().optional(),
@@ -384,14 +384,14 @@ export const SecretSchema = z.object({
   title: z.string().min(1, 'Secret title is required'),
   truth: z.string().min(1, 'Ground truth is required'),
   publicCoverStory: z.string().optional(),
-  severity: z.enum(['gossip', 'scandal', 'treason', 'dynasty_ending']).default('scandal'),
-  status: z.enum(['buried', 'whispered', 'exposed', 'discredited']).default('buried'),
-  subjectIds: z.array(z.string()).default([]),
-  knownByCharacterIds: z.array(z.string()).default([]),
-  suspectedByCharacterIds: z.array(z.string()).default([]),
+  severity: z.enum(['gossip', 'scandal', 'treason', 'dynasty_ending']).optional(),
+  status: z.enum(['buried', 'whispered', 'exposed', 'discredited']).optional(),
+  subjectIds: z.array(z.string()).optional(),
+  knownByCharacterIds: z.array(z.string()).optional(),
+  suspectedByCharacterIds: z.array(z.string()).optional(),
   leverageNote: z.string().optional(),
-  relatedEventIds: z.array(z.string()).default([]),
-  tags: z.array(z.string()).default([]),
+  relatedEventIds: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
   note: z.string().optional(),         // Optional historyLog append note
   date: z.string().optional(),
 });

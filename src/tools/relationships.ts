@@ -105,6 +105,11 @@ export function addRelationship(
       if (input.note && !input.oneWay) {
         inverseEdge.note = `Inverse of ${input.type}: ${input.note}`;
       }
+      if (!input.oneWay) {
+        if (input.isSecret !== undefined) inverseEdge.isSecret = input.isSecret;
+        if (input.sentiment !== undefined) inverseEdge.sentiment = input.sentiment;
+        if (input.publicFacade !== undefined) inverseEdge.publicFacade = input.publicFacade;
+      }
       inverseEdge.createdAt = now;
     }
 
@@ -150,6 +155,9 @@ export function addRelationship(
     toId: resolvedFromId,
     type: inverseType,
     note: inverseNote,
+    isSecret: input.oneWay ? undefined : input.isSecret,
+    sentiment: input.oneWay ? undefined : input.sentiment,
+    publicFacade: input.oneWay ? undefined : input.publicFacade,
     createdAt: now,
   };
 

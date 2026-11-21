@@ -149,13 +149,12 @@ export function upsertTome(
     }
   }
 
-  // Resolve related character IDs
-  const resolvedRelatedChars = (input.relatedCharacterIds || []).map((ref) =>
-    resolveCharacterRef(storage, activeId, ref)
-  );
-
   if (existingIndex >= 0) {
     const existing = storage.tomes[existingIndex];
+    const resolvedRelatedChars = input.relatedCharacterIds
+      ? input.relatedCharacterIds.map((ref) => resolveCharacterRef(storage, activeId, ref))
+      : undefined;
+
     const updated: Tome = {
       ...existing,
       ...input,
@@ -165,8 +164,9 @@ export function upsertTome(
       inWorldAuthor: input.inWorldAuthor ?? existing.inWorldAuthor,
       inGameDate: input.inGameDate ?? existing.inGameDate,
       reliability: input.reliability ?? existing.reliability ?? 'true',
-      relatedCharacterIds: resolvedRelatedChars.length > 0 ? resolvedRelatedChars : (existing.relatedCharacterIds || []),
+      relatedCharacterIds: resolvedRelatedChars ?? (existing.relatedCharacterIds || []),
       relatedEventIds: input.relatedEventIds ?? (existing.relatedEventIds || []),
+      tags: input.tags ?? (existing.tags || []),
       createdAt: existing.createdAt,
       updatedAt: now,
     };
@@ -175,6 +175,9 @@ export function upsertTome(
     return { success: true, tome: updated };
   } else {
     const newId = generateId();
+    const resolvedRelatedChars = (input.relatedCharacterIds || []).map((ref) =>
+      resolveCharacterRef(storage, activeId, ref)
+    );
     const created: Tome = {
       id: newId,
       campaignId: activeId,

@@ -1,4 +1,4 @@
-import { Storage, generateId } from '../storage.js';
+import { Storage, generateId, resolveCharacterRef } from '../storage.js';
 import { Thread, ThreadSchema } from '../schema.js';
 import { z } from 'zod';
 
@@ -54,11 +54,19 @@ export function upsertThread(
 
   if (existingIndex >= 0) {
     const existing = storage.threads[existingIndex];
+    const resolvedRelatedChars = input.relatedCharacterIds
+      ? input.relatedCharacterIds.map((ref) => resolveCharacterRef(storage, activeId, ref))
+      : undefined;
+
     const updated: Thread = {
       ...existing,
       ...input,
       id: existing.id,
       campaignId: existing.campaignId,
+      status: input.status ?? existing.status ?? 'open',
+      relatedCharacterIds: resolvedRelatedChars ?? (existing.relatedCharacterIds || []),
+      relatedEventIds: input.relatedEventIds ?? (existing.relatedEventIds || []),
+      tags: input.tags ?? (existing.tags || []),
       createdAt: existing.createdAt,
       updatedAt: now,
     };
@@ -67,13 +75,16 @@ export function upsertThread(
     return { success: true, thread: updated };
   } else {
     const newId = generateId();
+    const resolvedRelatedChars = (input.relatedCharacterIds || []).map((ref) =>
+      resolveCharacterRef(storage, activeId, ref)
+    );
     const created: Thread = {
       id: newId,
       campaignId: activeId,
       title: input.title,
       status: input.status || 'open',
       summary: input.summary,
-      relatedCharacterIds: input.relatedCharacterIds || [],
+      relatedCharacterIds: resolvedRelatedChars,
       relatedEventIds: input.relatedEventIds || [],
       tags: input.tags || [],
       createdAt: now,

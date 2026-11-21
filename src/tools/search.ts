@@ -86,13 +86,21 @@ export function searchChronicle(
     const chars = storage.characters.filter((c) => c.campaignId === activeId);
     for (const c of chars) {
       const matchedFields: string[] = [];
-      const primaryText = c.coreDrive || c.flaw || c.relationships || c.trajectory || c.face || c.voice || c.name;
 
       if (c.name.toLowerCase().includes(qLower)) matchedFields.push('name');
+      if (c.epithet && c.epithet.toLowerCase().includes(qLower)) matchedFields.push('epithet');
       if (c.house && c.house.toLowerCase().includes(qLower)) matchedFields.push('house');
+      if (c.titles && c.titles.some((t) => t.toLowerCase().includes(qLower))) matchedFields.push('titles');
+      if (c.culture && c.culture.toLowerCase().includes(qLower)) matchedFields.push('culture');
+      if (c.religion && c.religion.toLowerCase().includes(qLower)) matchedFields.push('religion');
+      if (c.traits && c.traits.some((t) => t.toLowerCase().includes(qLower))) matchedFields.push('traits');
       if (c.tags.some((t) => t.toLowerCase().includes(qLower))) matchedFields.push('tags');
       if (c.face && c.face.toLowerCase().includes(qLower)) matchedFields.push('face');
       if (c.voice && c.voice.toLowerCase().includes(qLower)) matchedFields.push('voice');
+      if (c.speechTells && c.speechTells.toLowerCase().includes(qLower)) matchedFields.push('speechTells');
+      if (c.currentObsession && c.currentObsession.toLowerCase().includes(qLower)) matchedFields.push('currentObsession');
+      if (c.formativeScars && c.formativeScars.some((s) => s.summary.toLowerCase().includes(qLower))) matchedFields.push('formativeScars');
+      if (c.activeGrudges && c.activeGrudges.some((g) => g.reason.toLowerCase().includes(qLower))) matchedFields.push('activeGrudges');
       if (c.coreDrive && c.coreDrive.toLowerCase().includes(qLower)) matchedFields.push('coreDrive');
       if (c.flaw && c.flaw.toLowerCase().includes(qLower)) matchedFields.push('flaw');
       if (c.modernAnalogue && c.modernAnalogue.toLowerCase().includes(qLower)) matchedFields.push('modernAnalogue');
@@ -101,6 +109,21 @@ export function searchChronicle(
       if (c.historyLog && c.historyLog.some((h) => h.note.toLowerCase().includes(qLower))) matchedFields.push('historyLog');
 
       if (matchedFields.length > 0) {
+        const primaryText = [
+          c.name,
+          c.epithet ? `"${c.epithet}"` : '',
+          c.house ? `of House ${c.house}` : '',
+          c.coreDrive,
+          c.currentObsession ? `Obsession: ${c.currentObsession}` : '',
+          c.traits?.join(', '),
+          c.flaw,
+          c.relationships,
+          c.trajectory,
+          c.face,
+          c.voice,
+          c.speechTells,
+        ].filter(Boolean).join(' ');
+
         results.characters.push({
           id: c.id,
           titleOrName: c.name,
@@ -144,12 +167,18 @@ export function searchChronicle(
     for (const t of tomes) {
       const matchedFields: string[] = [];
       if (t.title.toLowerCase().includes(qLower)) matchedFields.push('title');
+      if (t.sourceType && t.sourceType.toLowerCase().includes(qLower)) matchedFields.push('sourceType');
+      if (t.inWorldAuthor && t.inWorldAuthor.toLowerCase().includes(qLower)) matchedFields.push('inWorldAuthor');
+      if (t.inGameDate && t.inGameDate.toLowerCase().includes(qLower)) matchedFields.push('inGameDate');
+      if (t.reliability && t.reliability.toLowerCase().includes(qLower)) matchedFields.push('reliability');
       if (t.category && t.category.toLowerCase().includes(qLower)) matchedFields.push('category');
       if (t.tags.some((tg) => tg.toLowerCase().includes(qLower))) matchedFields.push('tags');
       if (t.content.toLowerCase().includes(qLower)) matchedFields.push('content');
 
       if (matchedFields.length > 0) {
-        const textForExcerpt = t.content.toLowerCase().includes(qLower) ? t.content : `${t.title} - ${t.content}`;
+        const textForExcerpt = t.content.toLowerCase().includes(qLower)
+          ? t.content
+          : `${t.title} (${t.sourceType || 'chronicle'} by ${t.inWorldAuthor || 'Unknown'}) - ${t.content}`;
         results.tomes.push({
           id: t.id,
           titleOrName: t.title,
@@ -190,12 +219,26 @@ export function searchChronicle(
     for (const h of houses) {
       const matchedFields: string[] = [];
       if (h.name.toLowerCase().includes(qLower)) matchedFields.push('name');
+      if (h.words && h.words.toLowerCase().includes(qLower)) matchedFields.push('words');
+      if (h.sigil && h.sigil.toLowerCase().includes(qLower)) matchedFields.push('sigil');
+      if (h.seat && h.seat.toLowerCase().includes(qLower)) matchedFields.push('seat');
+      if (h.reputation && h.reputation.toLowerCase().includes(qLower)) matchedFields.push('reputation');
+      if (h.culture && h.culture.toLowerCase().includes(qLower)) matchedFields.push('culture');
+      if (h.religion && h.religion.toLowerCase().includes(qLower)) matchedFields.push('religion');
       if (h.holdings && h.holdings.some((hl) => hl.toLowerCase().includes(qLower))) matchedFields.push('holdings');
       if (h.tags.some((t) => t.toLowerCase().includes(qLower))) matchedFields.push('tags');
       if (h.historyLog && h.historyLog.some((hl) => hl.note.toLowerCase().includes(qLower))) matchedFields.push('historyLog');
 
       if (matchedFields.length > 0) {
-        const textForExcerpt = `${h.name} (${h.status} house) ${h.holdings ? h.holdings.join(', ') : ''}`;
+        const textForExcerpt = [
+          h.name,
+          h.words ? `"${h.words}"` : '',
+          h.sigil,
+          h.seat ? `Seat: ${h.seat}` : '',
+          h.reputation,
+          h.holdings ? h.holdings.join(', ') : '',
+        ].filter(Boolean).join(' ');
+
         results.houses.push({
           id: h.id,
           titleOrName: h.name,
@@ -301,7 +344,12 @@ export function getRealmRecap(storage: Storage, campaignId?: string) {
 
   // 4. Recent events for active campaign
   const campaignEvents = storage.timeline.filter((e) => e.campaignId === activeId);
-  const sortedEvents = [...campaignEvents].sort((a, b) => b.createdAt - a.createdAt);
+  const sortedEvents = [...campaignEvents].sort((a, b) => {
+    if (typeof b.sortYear === 'number' && typeof a.sortYear === 'number' && b.sortYear !== a.sortYear) {
+      return b.sortYear - a.sortYear;
+    }
+    return b.createdAt - a.createdAt;
+  });
   const recentEvents = sortedEvents.slice(0, 5).map((e) => ({
     id: e.id,
     title: e.title,

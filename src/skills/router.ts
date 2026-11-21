@@ -1,4 +1,4 @@
-import { Storage, resolveCharacterRef, attachComputedAge } from '../storage.js';
+import { Storage, resolveCharacterRef, resolveEntityRef, attachComputedAge } from '../storage.js';
 import { RouteSkillInputSchema, SkillDefinition } from '../schema.js';
 import { loadAllSkills, getSkillById } from './loader.js';
 import { buildSceneBriefing } from '../tools/director.js';
@@ -30,6 +30,7 @@ export interface ScoredSkill {
   matchedTriggers: string[];
   matchedAntiTriggers: string[];
   worldStateBoosts: string[];
+  worldBoostTotal: number;
 }
 
 export interface RouteSkillResult {
@@ -116,17 +117,22 @@ export function routeSkill(
 
     if (input.autoBrief) {
       if (primary.autoPrefetch === 'scene_briefing') {
-        prefetchedContext.sceneBriefing = buildSceneBriefing(storage, {
-          characterIds: input.characterIds || [],
-          locationName: input.locationName,
-          povCharacterId: input.povCharacterId,
-          includeOmniscientSecrets: true,
-          campaignId: activeCampaignId,
-        });
-        prefetchNotice =
-          'sceneBriefing is ALREADY attached below. Do NOT call get_scene_briefing again for this scene.';
-        const idx = remainingTools.indexOf('get_scene_briefing');
-        if (idx !== -1) remainingTools.splice(idx, 1);
+        if (input.characterIds && input.characterIds.length > 0) {
+          prefetchedContext.sceneBriefing = buildSceneBriefing(storage, {
+            characterIds: input.characterIds,
+            locationName: input.locationName,
+            povCharacterId: input.povCharacterId,
+            includeOmniscientSecrets: true,
+            campaignId: activeCampaignId,
+          });
+          prefetchNotice =
+            'sceneBriefing is ALREADY attached below. Do NOT call get_scene_briefing again for this scene.';
+          const idx = remainingTools.indexOf('get_scene_briefing');
+          if (idx !== -1) remainingTools.splice(idx, 1);
+        } else {
+          prefetchNotice =
+            'No characterIds provided; call get_scene_briefing once scene participants are known.';
+        }
       } else if (primary.autoPrefetch === 'realm_recap') {
         prefetchedContext.realmRecap = buildRealmRecap(storage, activeCampaignId);
         prefetchNotice =
@@ -169,20 +175,35 @@ export function routeSkill(
     worldBoostsMap[skillId].push({ score, reason });
   };
 
+  // Collect houses represented by cast members
+  const castHouseIds = new Set<string>();
+  for (const castId of resolvedCastIds) {
+    const char = storage.characters.find((c) => c.campaignId === activeCampaignId && c.id === castId);
+    if (char?.house) {
+      castHouseIds.add(char.house);
+      const h = storage.houses.find(
+        (house) =>
+          house.campaignId === activeCampaignId &&
+          (house.id === char.house || house.name.toLowerCase() === char.house!.toLowerCase())
+      );
+      if (h) castHouseIds.add(h.id);
+    }
+  }
+
   // Boost: Secret Heat (+8 to court-intrigue)
   if (resolvedCastIds.length > 0) {
     const touchingSecrets = storage.secrets.filter((s) => {
       if (s.campaignId !== activeCampaignId) return false;
       if (s.status !== 'buried' && s.status !== 'whispered') return false;
       const allTouch = [...s.subjectIds, ...s.knownByCharacterIds, ...s.suspectedByCharacterIds];
-      return allTouch.some((id) => resolvedCastIds.includes(id));
+      return allTouch.some((id) => resolvedCastIds.includes(id) || castHouseIds.has(id));
     });
 
     if (touchingSecrets.length > 0) {
       addBoost(
         'court-intrigue',
         8,
-        `+8 Secret Heat: ${touchingSecrets.length} active secrets touch cast members`
+        `+8 Secret Heat: ${touchingSecrets.length} active secrets touch cast members or their houses`
       );
     }
   }
@@ -194,8 +215,8 @@ export function routeSkill(
       const char = storage.characters.find((c) => c.campaignId === activeCampaignId && c.id === castId);
       if (char?.activeGrudges && char.activeGrudges.length > 0) {
         for (const g of char.activeGrudges) {
-          const resolvedTarget = resolveCharacterRef(storage, activeCampaignId, g.targetId);
-          if (resolvedCastIds.includes(resolvedTarget)) {
+          const resolvedTarget = resolveEntityRef(storage, activeCampaignId, 'any', g.targetId);
+          if (resolvedCastIds.includes(resolvedTarget) || castHouseIds.has(resolvedTarget)) {
             hasGrudge = true;
             break;
           }
@@ -209,8 +230,12 @@ export function routeSkill(
       if (edge.campaignId !== activeCampaignId) continue;
       if (
         (edge.type === 'rival' || edge.type === 'enemy' || (edge.sentiment !== undefined && edge.sentiment < -10)) &&
-        resolvedCastIds.includes(edge.fromId) &&
-        resolvedCastIds.includes(edge.toId)
+        (
+          (resolvedCastIds.includes(edge.fromId) && resolvedCastIds.includes(edge.toId)) ||
+          (castHouseIds.has(edge.fromId) && castHouseIds.has(edge.toId)) ||
+          (resolvedCastIds.includes(edge.fromId) && castHouseIds.has(edge.toId)) ||
+          (castHouseIds.has(edge.fromId) && resolvedCastIds.includes(edge.toId))
+        )
       ) {
         hasFrictionEdge = true;
         break;
@@ -221,7 +246,7 @@ export function routeSkill(
       addBoost(
         'diplomacy-and-oaths',
         5,
-        '+5 Relational Friction: Grudge or rival/enemy ties between cast members'
+        '+5 Relational Friction: Grudge or rival/enemy ties between cast members or houses'
       );
     }
   }
@@ -322,7 +347,7 @@ export function routeSkill(
         }
       } else {
         const wordRegex = new RegExp(`\\b${escapeRegExp(antiLower)}\\b`, 'i');
-        if (wordRegex.test(normalizedIntent) || normalizedIntent.includes(antiLower)) {
+        if (wordRegex.test(normalizedIntent)) {
           score -= 12;
           matchedAntiTriggers.push(`"${anti}" (-12)`);
         }
@@ -330,9 +355,11 @@ export function routeSkill(
     }
 
     // World-state boosts
+    let worldBoostTotal = 0;
     const skillBoosts = worldBoostsMap[skill.id] || [];
     for (const b of skillBoosts) {
       score += b.score;
+      worldBoostTotal += b.score;
       worldStateBoosts.push(b.reason);
     }
 
@@ -345,6 +372,7 @@ export function routeSkill(
       matchedTriggers,
       matchedAntiTriggers,
       worldStateBoosts,
+      worldBoostTotal,
     });
   }
 
@@ -371,6 +399,7 @@ export function routeSkill(
       matchedTriggers: ['fallback selection'],
       matchedAntiTriggers: [],
       worldStateBoosts: [],
+      worldBoostTotal: 0,
     };
   }
 
@@ -392,7 +421,7 @@ export function routeSkill(
     const score1 = primaryCandidate.score;
     const score2 = secondCandidate.score;
 
-    if (score2 >= 10 && score2 >= score1 * 0.65 && score1 < 1000) {
+    if (((score2 >= 10 && score2 >= score1 * 0.65) || secondCandidate.worldBoostTotal >= 8) && score1 < 1000) {
       const directives = extractDirectives(secondCandidate.skill.playbook, 3);
       if (directives.length > 0) {
         secondaryBlend = {
@@ -407,17 +436,22 @@ export function routeSkill(
   // Auto-Prefetch Chaining
   if (input.autoBrief) {
     if (primary.autoPrefetch === 'scene_briefing') {
-      prefetchedContext.sceneBriefing = buildSceneBriefing(storage, {
-        characterIds: input.characterIds || [],
-        locationName: input.locationName,
-        povCharacterId: input.povCharacterId,
-        includeOmniscientSecrets: true,
-        campaignId: activeCampaignId,
-      });
-      prefetchNotice =
-        'sceneBriefing is ALREADY attached below. Do NOT call get_scene_briefing again for this scene.';
-      const idx = remainingTools.indexOf('get_scene_briefing');
-      if (idx !== -1) remainingTools.splice(idx, 1);
+      if (input.characterIds && input.characterIds.length > 0) {
+        prefetchedContext.sceneBriefing = buildSceneBriefing(storage, {
+          characterIds: input.characterIds,
+          locationName: input.locationName,
+          povCharacterId: input.povCharacterId,
+          includeOmniscientSecrets: true,
+          campaignId: activeCampaignId,
+        });
+        prefetchNotice =
+          'sceneBriefing is ALREADY attached below. Do NOT call get_scene_briefing again for this scene.';
+        const idx = remainingTools.indexOf('get_scene_briefing');
+        if (idx !== -1) remainingTools.splice(idx, 1);
+      } else {
+        prefetchNotice =
+          'No characterIds provided; call get_scene_briefing once scene participants are known.';
+      }
     } else if (primary.autoPrefetch === 'realm_recap') {
       prefetchedContext.realmRecap = buildRealmRecap(storage, activeCampaignId);
       prefetchNotice =

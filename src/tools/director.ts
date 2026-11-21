@@ -96,9 +96,23 @@ export function getSceneBriefing(
       flaw: c.flaw,
       formativeScars,
       recentHistory,
-      historyLog: recentHistory,
     };
   });
+
+  // Collect houses represented by characters in the room
+  const representedHouseIds = new Set<string>();
+  const representedHouseNames = new Set<string>();
+  for (const c of resolvedCast) {
+    if (c.house) {
+      representedHouseNames.add(c.house.toLowerCase());
+      const h = storage.houses.find(
+        (house) =>
+          house.campaignId === activeCampaignId &&
+          (house.id === c.house || house.name.toLowerCase() === c.house.toLowerCase())
+      );
+      if (h) representedHouseIds.add(h.id);
+    }
+  }
 
   // 3. Extract In-Room Relational Friction
   const inRoomRelationships: any[] = [];
@@ -132,22 +146,26 @@ export function getSceneBriefing(
       }
     }
 
-    // House-to-house edges between represented dynasties
+    // House-to-house edges between represented dynasties (strictly requiring BOTH houses present in room)
     if (edge.fromType === 'house' && edge.toType === 'house') {
-      const houseNames = resolvedCast.map((c) => c.house?.toLowerCase()).filter(Boolean);
-      const fromHouse = storage.houses.find(
-        (h) => h.campaignId === activeCampaignId && (h.id === edge.fromId || houseNames.includes(h.name.toLowerCase()))
-      );
-      const toHouse = storage.houses.find(
-        (h) => h.campaignId === activeCampaignId && (h.id === edge.toId || houseNames.includes(h.name.toLowerCase()))
-      );
+      const fromMatches = representedHouseIds.has(edge.fromId) || representedHouseNames.has(edge.fromId.toLowerCase());
+      const toMatches = representedHouseIds.has(edge.toId) || representedHouseNames.has(edge.toId.toLowerCase());
 
-      if (fromHouse && toHouse && fromHouse.id !== toHouse.id) {
+      if (fromMatches && toMatches && edge.fromId !== edge.toId) {
+        const fromHouse = storage.houses.find(
+          (h) => h.campaignId === activeCampaignId && (h.id === edge.fromId || h.name.toLowerCase() === edge.fromId.toLowerCase())
+        );
+        const toHouse = storage.houses.find(
+          (h) => h.campaignId === activeCampaignId && (h.id === edge.toId || h.name.toLowerCase() === edge.toId.toLowerCase())
+        );
+        const fromName = fromHouse ? fromHouse.name : edge.fromId;
+        const toName = toHouse ? toHouse.name : edge.toId;
+
         if (!processedPairs.has(edge.pairId)) {
           processedPairs.add(edge.pairId);
           inRoomRelationships.push({
-            from: `House ${fromHouse.name}`,
-            to: `House ${toHouse.name}`,
+            from: `House ${fromName}`,
+            to: `House ${toName}`,
             type: edge.type,
             note: edge.note,
           });
@@ -156,12 +174,21 @@ export function getSceneBriefing(
     }
   }
 
-  // Active in-room grudges
+  // Active in-room grudges (resolving target IDs or names across characters and houses)
   const inRoomGrudges: any[] = [];
   for (const char of resolvedCast) {
     for (const grudge of char.activeGrudges || []) {
+      const resolvedTarget = resolveEntityRef(storage, activeCampaignId, 'any', grudge.targetId);
       const targetChar = resolvedCast.find(
-        (c) => c.id === grudge.targetId || (c.house && c.house.toLowerCase() === grudge.targetId.toLowerCase())
+        (c) =>
+          c.id === grudge.targetId ||
+          c.id === resolvedTarget ||
+          c.name.toLowerCase() === grudge.targetId.toLowerCase() ||
+          (c.house && (
+            c.house.toLowerCase() === grudge.targetId.toLowerCase() ||
+            c.house.toLowerCase() === resolvedTarget.toLowerCase() ||
+            representedHouseIds.has(resolvedTarget)
+          ))
       );
 
       if (targetChar) {
@@ -176,7 +203,7 @@ export function getSceneBriefing(
     }
   }
 
-  // 4. Compute the Intrigue Matrix
+  // 4. Compute the Intrigue Matrix (Excludes exposed secrets - only hidden buried/whispered truths generate leverage)
   const activeLeverage: any[] = [];
   const sharedConspiracies: any[] = [];
   const hiddenBlindSpots: any[] = [];
@@ -185,8 +212,8 @@ export function getSceneBriefing(
   const relevantSecrets = storage.secrets.filter(
     (s) =>
       s.campaignId === activeCampaignId &&
-      s.status !== 'discredited' &&
-      (s.subjectIds.some((id) => castIds.includes(id)) ||
+      (s.status === 'buried' || s.status === 'whispered') &&
+      (s.subjectIds.some((id) => castIds.includes(id) || representedHouseIds.has(id) || representedHouseNames.has(id.toLowerCase())) ||
         s.knownByCharacterIds.some((id) => castIds.includes(id)) ||
         s.suspectedByCharacterIds.some((id) => castIds.includes(id)))
   );
@@ -194,7 +221,13 @@ export function getSceneBriefing(
   for (const s of relevantSecrets) {
     const knownInRoom = s.knownByCharacterIds.filter((id) => castIds.includes(id));
     const suspectedInRoom = s.suspectedByCharacterIds.filter((id) => castIds.includes(id));
-    const subjectsInRoom = s.subjectIds.filter((id) => castIds.includes(id));
+    const subjectsInRoom = resolvedCast
+      .filter((c) => {
+        if (s.subjectIds.includes(c.id)) return true;
+        if (c.house && (s.subjectIds.includes(c.house) || representedHouseIds.has(c.house) || representedHouseNames.has(c.house.toLowerCase()))) return true;
+        return false;
+      })
+      .map((c) => c.id);
 
     // Shared conspiracy: 2 or more characters in the room share knowledge
     if (knownInRoom.length >= 2) {

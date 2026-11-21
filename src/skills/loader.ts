@@ -207,9 +207,10 @@ export function loadAllSkills(skillsDir?: string): SkillDefinition[] {
   const files = scanSkillFiles(dir);
   const activeFiles = new Set(files);
 
-  // Evict removed files from cache
+  // Evict removed files scoped to this directory from cache
+  const resolvedDir = path.resolve(dir);
   for (const cachedPath of skillCache.keys()) {
-    if (!activeFiles.has(cachedPath)) {
+    if (path.resolve(cachedPath).startsWith(resolvedDir) && !activeFiles.has(cachedPath)) {
       skillCache.delete(cachedPath);
     }
   }

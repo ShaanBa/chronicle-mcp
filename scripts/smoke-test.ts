@@ -69,6 +69,8 @@ import {
   listSkills,
   getSkill,
 } from '../src/tools/skills.js';
+import { createChronicleServer } from '../src/index.js';
+import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import {
   loadAllSkills,
   getSkillById,
@@ -107,6 +109,18 @@ async function runSmokeTest() {
   function check(description: string, fn: () => void) {
     try {
       fn();
+      console.log(`  [PASS] ${description}`);
+      passed++;
+    } catch (err: any) {
+      console.error(`  [FAIL] ${description}`);
+      console.error(`    Error: ${err.message}`);
+      failed++;
+    }
+  }
+
+  async function checkAsync(description: string, fn: () => Promise<void>) {
+    try {
+      await fn();
       console.log(`  [PASS] ${description}`);
       passed++;
     } catch (err: any) {
@@ -707,10 +721,10 @@ async function runSmokeTest() {
     povCharacterId: charBobId,
   });
 
-  check('getSceneBriefing compacts cast historyLog to maximum 2 entries', () => {
+  check('getSceneBriefing compacts cast historyLog to maximum 2 entries in recentHistory', () => {
     const aliceInBriefing = guardrailBriefing.cast.find((c: any) => c.id === charAliceId);
     assert(aliceInBriefing !== undefined, 'Alice in briefing');
-    assert(aliceInBriefing.historyLog.length <= 2, `History log truncated to <= 2 (was ${aliceInBriefing.historyLog.length})`);
+    assert((aliceInBriefing.recentHistory || aliceInBriefing.historyLog).length <= 2, `History log truncated to <= 2 (was ${(aliceInBriefing.recentHistory || aliceInBriefing.historyLog).length})`);
   });
 
   check('getSceneBriefing limits localVoices to maximum 3 entries', () => {
@@ -861,9 +875,9 @@ async function runSmokeTest() {
     sentiment: -25,
   });
 
-  check('Live world-state activates boosts and blends runner-up when within score threshold', () => {
+  check('Live world-state activates boosts and blends runner-up when within score threshold or secret heat >= 8', () => {
     const blendRes = routeSkill(storage, {
-      intent: 'parley to negotiate an alliance treaty with secret leverage',
+      intent: 'negotiate a marriage pact and alliance between families',
       characterIds: [charAliceId, charBobId],
       autoBrief: false,
       includeSecondary: true,
@@ -989,6 +1003,275 @@ toolSequence:
     }
     clearSkillCache();
   }
+
+  // 28. Partial-Update Data Preservation
+  console.log('\nTest 28: Partial-Update Data Preservation & Transient Field Stripping');
+  const raymundP0Res = upsertCharacter(storage, {
+    name: 'Lord Raymund P0',
+    house: 'House Mooton',
+    tags: ['OriginalTag1', 'OriginalTag2'],
+    titles: ['Lord of Maidenpool'],
+    traits: ['Proud', 'Cautious'],
+    status: 'alive',
+  });
+  const raymundP0Id = raymundP0Res.character.id;
+
+  // Partial update omitting tags, titles, traits
+  const raymundUpdateRes = upsertCharacter(storage, {
+    id: raymundP0Id,
+    name: 'Lord Raymund P0',
+    currentObsession: 'Securing the Harbor Fort',
+    note: 'Transient milestone note',
+    date: '298 AC',
+  });
+
+  check('upsertCharacter partial update preserves existing tags, titles, and traits', () => {
+    assert(raymundUpdateRes.success === true, 'Update succeeded');
+    const c = storage.characters.find((char) => char.id === raymundP0Id)!;
+    assert(c.tags.includes('OriginalTag1') && c.tags.includes('OriginalTag2'), 'Tags preserved');
+    assert(c.titles.includes('Lord of Maidenpool'), 'Titles preserved');
+    assert(c.traits.includes('Proud'), 'Traits preserved');
+    assert(c.currentObsession === 'Securing the Harbor Fort', 'Obsession updated');
+    assert((c as any).note === undefined, 'Transient note stripped from character record');
+    assert((c as any).date === undefined, 'Transient date stripped from character record');
+    assert(c.historyLog.some((h) => h.note.includes('Transient milestone note')), 'Note recorded in historyLog');
+  });
+
+  // House partial update
+  const mootonRes = upsertHouse(storage, {
+    name: 'House Mooton',
+    holdings: ['Maidenpool Castle', 'Harbor Watchtower'],
+    tags: ['Riverlands', 'Merchant'],
+    words: 'Wisdom and Strength',
+  });
+  const mootonId = mootonRes.house.id;
+
+  const mootonUpdateRes = upsertHouse(storage, {
+    id: mootonId,
+    name: 'House Mooton',
+    prestige: 150,
+    note: 'Prestige elevation',
+  });
+
+  check('upsertHouse partial update preserves holdings and tags without wiping to []', () => {
+    assert(mootonUpdateRes.success === true, 'House update succeeded');
+    const h = storage.houses.find((house) => house.id === mootonId)!;
+    assert(h.holdings.includes('Maidenpool Castle'), 'Holdings preserved');
+    assert(h.tags.includes('Merchant'), 'Tags preserved');
+    assert(h.words === 'Wisdom and Strength', 'Words preserved');
+    assert(h.prestige === 150, 'Prestige updated');
+    assert((h as any).note === undefined, 'Transient note stripped');
+  });
+
+  // Secret partial update
+  const secretPartRes = upsertSecret(storage, {
+    title: 'The Smuggler Guild',
+    truth: 'Smugglers use the sea gate at night.',
+    severity: 'treason',
+    status: 'buried',
+    subjectIds: [raymundP0Id],
+    knownByCharacterIds: [charAliceId],
+    tags: ['Contraband', 'Smuggling'],
+  });
+  const secretPartId = secretPartRes.secret.id;
+
+  const secretUpdateRes = upsertSecret(storage, {
+    id: secretPartId,
+    title: 'The Smuggler Guild',
+    truth: 'Smugglers use the sea gate at night.',
+    status: 'whispered',
+    note: 'Rumors spread to the docks.',
+  });
+
+  check('upsertSecret partial update preserves knownByCharacterIds and tags', () => {
+    assert(secretUpdateRes.success === true, 'Secret update succeeded');
+    const s = storage.secrets.find((sec) => sec.id === secretPartId)!;
+    assert(s.knownByCharacterIds.includes(charAliceId), 'knownByCharacterIds preserved');
+    assert(s.tags.includes('Contraband'), 'Tags preserved');
+    assert(s.status === 'whispered', 'Status updated');
+    assert((s as any).note === undefined, 'Transient note stripped');
+  });
+
+  // 29. MCP Tool Schema Parity
+  console.log('\nTest 29: MCP Tool Schema Parity in createChronicleServer');
+  const testMcpServer = createChronicleServer(storage);
+  await checkAsync('createChronicleServer registers tools with correct Phase 1 & 2 schemas', async () => {
+    const handlers = (testMcpServer as any)._requestHandlers;
+    const listToolsHandler = handlers?.get(ListToolsRequestSchema.shape.method.value);
+    assert(listToolsHandler !== undefined, 'ListTools handler registered');
+    const res = await listToolsHandler({ method: 'tools/list' });
+    const registeredTools = res.tools;
+
+    // Check log_timeline_event mechanicalOutcome is object
+    const timelineTool = registeredTools.find((t: any) => t.name === 'log_timeline_event');
+    assert(timelineTool !== undefined, 'log_timeline_event tool found');
+    const outcomeSchema = timelineTool.inputSchema.properties.entry.properties.mechanicalOutcome;
+    assert(outcomeSchema.type === 'object', `mechanicalOutcome must be object (was ${outcomeSchema.type})`);
+    assert(outcomeSchema.properties.summary !== undefined, 'mechanicalOutcome has summary');
+
+    // Check upsert_character has Phase 1/2 fields and no phantom fields
+    const charTool = registeredTools.find((t: any) => t.name === 'upsert_character');
+    assert(charTool !== undefined, 'upsert_character tool found');
+    const charProps = charTool.inputSchema.properties.character.properties;
+    assert(charProps.traits !== undefined, 'traits in upsert_character schema');
+    assert(charProps.activeGrudges !== undefined, 'activeGrudges in upsert_character schema');
+    assert(charProps.currentObsession !== undefined, 'currentObsession in upsert_character schema');
+    assert(charProps.born === undefined, 'phantom field born removed');
+    assert(charProps.summary === undefined, 'phantom field summary removed');
+
+    // Check upsert_house uses words, sigil, seat, not motto/coatOfArms
+    const houseTool = registeredTools.find((t: any) => t.name === 'upsert_house');
+    assert(houseTool !== undefined, 'upsert_house tool found');
+    const houseProps = houseTool.inputSchema.properties.house.properties;
+    assert(houseProps.words !== undefined, 'words in upsert_house schema');
+    assert(houseProps.sigil !== undefined, 'sigil in upsert_house schema');
+    assert(houseProps.seat !== undefined, 'seat in upsert_house schema');
+    assert(houseProps.motto === undefined, 'obsolete motto removed');
+    assert(houseProps.coatOfArms === undefined, 'obsolete coatOfArms removed');
+
+    // Check add_relationship has isSecret, sentiment, publicFacade, oneWay
+    const relTool = registeredTools.find((t: any) => t.name === 'add_relationship');
+    assert(relTool !== undefined, 'add_relationship tool found');
+    const relProps = relTool.inputSchema.properties;
+    assert(relProps.isSecret !== undefined, 'isSecret in add_relationship schema');
+    assert(relProps.sentiment !== undefined, 'sentiment in add_relationship schema');
+    assert(relProps.publicFacade !== undefined, 'publicFacade in add_relationship schema');
+    assert(relProps.oneWay !== undefined, 'oneWay in add_relationship schema');
+  });
+
+  // 30. House-to-House Relationship Isolation in Scene Briefing
+  console.log('\nTest 30: House-to-House Relationship Isolation in Scene Briefing');
+  const houseStarkRes = upsertHouse(storage, { name: 'House Stark of Winterfell', words: 'Winter is Coming' });
+  const houseLannisterRes = upsertHouse(storage, { name: 'House Lannister of Casterly Rock', words: 'Hear Me Roar' });
+  const houseMartellRes = upsertHouse(storage, { name: 'House Martell of Sunspear', words: 'Unbowed, Unbent, Unbroken' });
+  const houseTyrellRes = upsertHouse(storage, { name: 'House Tyrell of Highgarden', words: 'Growing Strong' });
+
+  addRelationship(storage, {
+    fromType: 'house',
+    fromId: houseStarkRes.house.id,
+    toType: 'house',
+    toId: houseLannisterRes.house.id,
+    type: 'enemy',
+    note: 'Blood feud since the execution of Ned Stark',
+  });
+
+  addRelationship(storage, {
+    fromType: 'house',
+    fromId: houseMartellRes.house.id,
+    toType: 'house',
+    toId: houseTyrellRes.house.id,
+    type: 'rival',
+    note: 'Ancient Reach-Dorne border skirmishes',
+  });
+
+  const starkChar = upsertCharacter(storage, { name: 'Robb Stark', house: houseStarkRes.house.name });
+  const lannisterChar = upsertCharacter(storage, { name: 'Jaime Lannister', house: houseLannisterRes.house.name });
+
+  check('getSceneBriefing only includes house relationships for dynasties present in the room', () => {
+    const briefing = getSceneBriefing(storage, {
+      characterIds: [starkChar.character.id, lannisterChar.character.id],
+    });
+
+    const houseRels = briefing.inRoomRelationships.filter((r: any) =>
+      r.from.includes('Stark') || r.to.includes('Stark') || r.from.includes('Lannister') || r.to.includes('Lannister')
+    );
+    assert(houseRels.length > 0, 'Stark-Lannister house relationship included');
+
+    const unrelatedRels = briefing.inRoomRelationships.filter((r: any) =>
+      r.from.includes('Martell') || r.to.includes('Martell') || r.from.includes('Tyrell') || r.to.includes('Tyrell')
+    );
+    assert(unrelatedRels.length === 0, `Unrelated Martell-Tyrell house edges leaked (found ${unrelatedRels.length})`);
+  });
+
+  // 31. Secret Inverse Edge Mirroring & Maester Mode Hiding
+  console.log('\nTest 31: Secret Inverse Edge Mirroring & Maester Mode Hiding');
+  const secretRelCharA = upsertCharacter(storage, { name: 'Daeron Blackfyre' }).character.id;
+  const secretRelCharB = upsertCharacter(storage, { name: 'Daemon Rivers' }).character.id;
+
+  addRelationship(storage, {
+    fromType: 'character',
+    fromId: secretRelCharA,
+    toType: 'character',
+    toId: secretRelCharB,
+    type: 'ally',
+    isSecret: true,
+    sentiment: 40,
+    publicFacade: 'Vicious rivals',
+    note: 'Secretly plotting a joint rebellion',
+  });
+
+  check('Inverse edge mirrors isSecret and is hidden in Maester Mode (includeSecrets: false)', () => {
+    // List for B (the target of the forward edge) in Maester Mode
+    const maesterB = listRelationships(storage, 'character', secretRelCharB, false);
+    assert(maesterB.relationships.length === 0, `Inverse edge leaked in Maester mode (found ${maesterB.relationships.length})`);
+
+    // List for B in Omniscient Mode
+    const omniscientB = listRelationships(storage, 'character', secretRelCharB, true);
+    assert(omniscientB.relationships.length === 1, 'Inverse edge visible in Omniscient mode');
+    assert(omniscientB.relationships[0].isSecret === true, 'Inverse edge has isSecret: true');
+    assert(omniscientB.relationships[0].sentiment === 40, 'Inverse edge has sentiment: 40');
+    assert(omniscientB.relationships[0].publicFacade === 'Vicious rivals', 'Inverse edge has publicFacade');
+  });
+
+  // 32. Exposed Secrets Excluded from gmGuardrail and activeLeverage
+  console.log('\nTest 32: Exposed Secrets Excluded from gmGuardrail and activeLeverage');
+  const exposedSecretRes = upsertSecret(storage, {
+    title: 'The Queen Mother Poisoned the King',
+    truth: 'Nightshade in the mulled wine',
+    status: 'exposed',
+    severity: 'treason',
+    subjectIds: [starkChar.character.id],
+    knownByCharacterIds: [starkChar.character.id],
+    leverageNote: 'Execution if proven',
+  });
+
+  const buriedSecretRes = upsertSecret(storage, {
+    title: 'Stark Golden Vault Key',
+    truth: 'Hidden in Robb boots',
+    status: 'buried',
+    severity: 'scandal',
+    subjectIds: [starkChar.character.id],
+    knownByCharacterIds: [starkChar.character.id],
+    leverageNote: 'Stark treasury access',
+  });
+
+  check('Exposed secrets are excluded from getSceneBriefing gmGuardrail leverage and blind spots', () => {
+    const briefing = getSceneBriefing(storage, {
+      characterIds: [starkChar.character.id, lannisterChar.character.id],
+      povCharacterId: lannisterChar.character.id,
+    });
+
+    const matrix = briefing.intrigueMatrix;
+    assert(matrix !== undefined, 'intrigueMatrix is attached');
+    assert(matrix.gmGuardrail !== undefined, 'gmGuardrail is attached for buried secret');
+    assert(matrix.gmGuardrail.includes('Stark Golden Vault Key'), 'Buried secret is in gmGuardrail');
+    assert(!matrix.gmGuardrail.includes('The Queen Mother Poisoned the King'), 'Exposed secret is NOT in gmGuardrail');
+
+    const leverageMatches = matrix.activeLeverage.filter((l: any) => l.secretTitle === 'The Queen Mother Poisoned the King');
+    assert(leverageMatches.length === 0, 'Exposed secret must not appear in activeLeverage');
+
+    const blindSpotMatches = matrix.hiddenBlindSpots.filter((b: any) => b.secretTitle === 'The Queen Mother Poisoned the King');
+    assert(blindSpotMatches.length === 0, 'Exposed secret must not appear in hiddenBlindSpots');
+  });
+
+  // 33. route_skill Without characterIds Keeps get_scene_briefing in Recommended Tools
+  console.log('\nTest 33: route_skill Without characterIds Behavior');
+  check('routeSkill without characterIds does not prefetch sceneBriefing and keeps get_scene_briefing in tools', () => {
+    const res = routeSkill(storage, {
+      intent: 'plotting murder and blackmail against the council',
+      autoBrief: true,
+    });
+
+    assert(res.success === true, 'routeSkill succeeded');
+    assert(res.primarySkill.id === 'court-intrigue', `Expected court-intrigue, got ${res.primarySkill.id}`);
+    assert(res.prefetchedContext?.sceneBriefing === undefined, 'sceneBriefing must NOT be prefetched without characterIds');
+    assert(
+      res.remainingRecommendedTools.includes('get_scene_briefing'),
+      'get_scene_briefing must remain in remainingRecommendedTools when not prefetched'
+    );
+    assert(res.prefetchNotice !== undefined, 'prefetchNotice must be set');
+    assert(res.prefetchNotice!.includes('No characterIds provided'), 'prefetchNotice informs user to call get_scene_briefing once participants are known');
+  });
 
   // Clean up scratch directory
   if (fs.existsSync(scratchDataDir)) {

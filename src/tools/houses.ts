@@ -146,11 +146,16 @@ export function upsertHouse(
       }
     }
 
+    const { note, date, ...entityFields } = input;
+
     const updated: House = {
       ...existing,
-      ...input,
+      ...entityFields,
       id: existing.id,
       campaignId: existing.campaignId,
+      status: input.status ?? existing.status ?? 'ruling',
+      holdings: input.holdings ?? existing.holdings ?? [],
+      tags: input.tags ?? existing.tags ?? [],
       words: input.words ?? existing.words,
       sigil: input.sigil ?? existing.sigil,
       seat: input.seat ?? existing.seat,
@@ -188,7 +193,10 @@ export function upsertHouse(
       });
     }
 
+    const { note, date, ...entityFields } = input;
+
     const created: House = {
+      ...entityFields,
       id: newId,
       campaignId: activeId,
       name: input.name,

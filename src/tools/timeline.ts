@@ -1,4 +1,4 @@
-import { Storage, generateId } from '../storage.js';
+import { Storage, generateId, resolveCharacterRef } from '../storage.js';
 import { TimelineEntry, TimelineEntrySchema, TimelineUpdateSchema } from '../schema.js';
 import { z } from 'zod';
 
@@ -24,7 +24,12 @@ export function listTimeline(
     );
   }
 
-  entries.sort((a, b) => b.createdAt - a.createdAt);
+  entries.sort((a, b) => {
+    if (typeof b.sortYear === 'number' && typeof a.sortYear === 'number' && b.sortYear !== a.sortYear) {
+      return b.sortYear - a.sortYear;
+    }
+    return b.createdAt - a.createdAt;
+  });
 
   const sliced = entries.slice(0, limit);
 
@@ -73,13 +78,12 @@ export function logTimelineEvent(
     const noteText = `Timeline Event: ${input.title}${gist ? ` — ${gist}` : ''}`;
 
     for (const rawTag of input.tags) {
-      const tagLower = rawTag.trim().toLowerCase();
-      if (!tagLower) continue;
+      const tagTrimmed = rawTag.trim();
+      if (!tagTrimmed) continue;
 
+      const canonicalId = resolveCharacterRef(storage, activeId, tagTrimmed);
       const matchingChar = storage.characters.find(
-        (c) =>
-          c.campaignId === activeId &&
-          (c.id === tagLower || c.name.trim().toLowerCase() === tagLower || c.name.trim().toLowerCase().includes(tagLower))
+        (c) => c.campaignId === activeId && c.id === canonicalId
       );
 
       if (matchingChar) {

@@ -9,18 +9,21 @@ export function upsertSecret(
   const activeCampaignId = input.campaignId || storage.activeCampaignId;
   const isUpdate = Boolean(input.id);
 
-  // Normalize references
-  const resolvedSubjects = [
-    ...new Set((input.subjectIds || []).map((ref) => resolveEntityRef(storage, activeCampaignId, 'any', ref))),
-  ];
-  const resolvedKnown = [
-    ...new Set((input.knownByCharacterIds || []).map((ref) => resolveCharacterRef(storage, activeCampaignId, ref))),
-  ];
+  // Normalize references if provided
+  const resolvedSubjects = input.subjectIds
+    ? [...new Set(input.subjectIds.map((ref) => resolveEntityRef(storage, activeCampaignId, 'any', ref)))]
+    : undefined;
+  const resolvedKnown = input.knownByCharacterIds
+    ? [...new Set(input.knownByCharacterIds.map((ref) => resolveCharacterRef(storage, activeCampaignId, ref)))]
+    : undefined;
   // Knowing supersedes suspecting: if character is in knownBy, they cannot be in suspectedBy
-  const resolvedSuspected = [
-    ...new Set((input.suspectedByCharacterIds || []).map((ref) => resolveCharacterRef(storage, activeCampaignId, ref))),
-  ].filter((id) => !resolvedKnown.includes(id));
+  const resolvedSuspected = input.suspectedByCharacterIds
+    ? [...new Set(input.suspectedByCharacterIds.map((ref) => resolveCharacterRef(storage, activeCampaignId, ref)))].filter(
+        (id) => !(resolvedKnown || []).includes(id)
+      )
+    : undefined;
 
+  const { note, date, ...entityFields } = input;
   let secret: Secret;
 
   if (isUpdate) {
@@ -51,17 +54,18 @@ export function upsertSecret(
 
     secret = {
       ...existing,
+      ...entityFields,
       title: input.title,
       truth: input.truth,
       publicCoverStory: input.publicCoverStory ?? existing.publicCoverStory,
-      severity: input.severity ?? existing.severity,
-      status: input.status ?? existing.status,
-      subjectIds: resolvedSubjects.length > 0 ? resolvedSubjects : existing.subjectIds,
-      knownByCharacterIds: resolvedKnown,
-      suspectedByCharacterIds: resolvedSuspected,
+      severity: input.severity ?? existing.severity ?? 'scandal',
+      status: input.status ?? existing.status ?? 'buried',
+      subjectIds: resolvedSubjects ?? existing.subjectIds ?? [],
+      knownByCharacterIds: resolvedKnown ?? existing.knownByCharacterIds ?? [],
+      suspectedByCharacterIds: resolvedSuspected ?? existing.suspectedByCharacterIds ?? [],
       leverageNote: input.leverageNote ?? existing.leverageNote,
-      relatedEventIds: input.relatedEventIds ?? existing.relatedEventIds,
-      tags: input.tags ?? existing.tags,
+      relatedEventIds: input.relatedEventIds ?? existing.relatedEventIds ?? [],
+      tags: input.tags ?? existing.tags ?? [],
       historyLog,
       updatedAt: Date.now(),
     };
@@ -73,20 +77,21 @@ export function upsertSecret(
     historyLog.push({
       timestamp: Date.now(),
       date: input.date,
-      note: input.note || `Secret established with status '${input.status}'.`,
+      note: input.note || `Secret established with status '${input.status || 'buried'}'.`,
     });
 
     secret = {
+      ...entityFields,
       id: newId,
       campaignId: activeCampaignId,
       title: input.title,
       truth: input.truth,
       publicCoverStory: input.publicCoverStory,
-      severity: input.severity,
-      status: input.status,
-      subjectIds: resolvedSubjects,
-      knownByCharacterIds: resolvedKnown,
-      suspectedByCharacterIds: resolvedSuspected,
+      severity: input.severity || 'scandal',
+      status: input.status || 'buried',
+      subjectIds: resolvedSubjects || [],
+      knownByCharacterIds: resolvedKnown || [],
+      suspectedByCharacterIds: resolvedSuspected || [],
       leverageNote: input.leverageNote,
       relatedEventIds: input.relatedEventIds || [],
       tags: input.tags || [],

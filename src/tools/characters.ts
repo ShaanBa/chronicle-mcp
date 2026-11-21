@@ -1,4 +1,4 @@
-import { Storage, generateId, attachComputedAge } from '../storage.js';
+import { Storage, generateId, attachComputedAge, resolveEntityRef } from '../storage.js';
 import { Character, CharacterSchema, HistoryLogEntry } from '../schema.js';
 import { z } from 'zod';
 
@@ -134,6 +134,15 @@ export function upsertCharacter(
   const now = Date.now();
   let existingIndex = -1;
 
+  const resolvedGrudges = input.activeGrudges
+    ? input.activeGrudges.map((g) => ({
+        ...g,
+        targetId: resolveEntityRef(storage, activeId, 'any', g.targetId),
+      }))
+    : undefined;
+
+  const { note, date, ...entityFields } = input;
+
   if (input.id) {
     existingIndex = storage.characters.findIndex((c) => c.id === input.id && c.campaignId === activeId);
     if (existingIndex === -1) {
@@ -169,21 +178,23 @@ export function upsertCharacter(
 
     const updated: Character = {
       ...existing,
-      ...input,
+      ...entityFields,
       id: existing.id,
       campaignId: existing.campaignId,
+      status: input.status ?? existing.status ?? 'alive',
+      tags: input.tags ?? existing.tags ?? [],
       epithet: input.epithet ?? existing.epithet,
-      titles: input.titles && input.titles.length > 0 ? input.titles : (existing.titles || []),
+      titles: input.titles ?? existing.titles ?? [],
       birthYear: input.birthYear ?? existing.birthYear,
       deathYear: input.deathYear ?? existing.deathYear,
       causeOfDeath: input.causeOfDeath ?? existing.causeOfDeath,
       culture: input.culture ?? existing.culture,
       religion: input.religion ?? existing.religion,
-      traits: input.traits && input.traits.length > 0 ? input.traits : (existing.traits || []),
+      traits: input.traits ?? existing.traits ?? [],
       speechTells: input.speechTells ?? existing.speechTells,
       currentObsession: input.currentObsession ?? existing.currentObsession,
-      formativeScars: input.formativeScars && input.formativeScars.length > 0 ? input.formativeScars : (existing.formativeScars || []),
-      activeGrudges: input.activeGrudges && input.activeGrudges.length > 0 ? input.activeGrudges : (existing.activeGrudges || []),
+      formativeScars: input.formativeScars ?? existing.formativeScars ?? [],
+      activeGrudges: resolvedGrudges ?? existing.activeGrudges ?? [],
       historyLog,
       createdAt: existing.createdAt,
       updatedAt: now,
@@ -221,12 +232,13 @@ export function upsertCharacter(
     }
 
     const created: Character = {
+      ...entityFields,
       id: newId,
       campaignId: activeId,
       name: input.name,
       house: input.house,
-      status: input.status || 'alive',
-      tags: input.tags || [],
+      status: input.status ?? 'alive',
+      tags: input.tags ?? [],
       face: input.face,
       voice: input.voice,
       coreDrive: input.coreDrive,
@@ -235,17 +247,17 @@ export function upsertCharacter(
       relationships: input.relationships,
       trajectory: input.trajectory,
       epithet: input.epithet,
-      titles: input.titles || [],
+      titles: input.titles ?? [],
       birthYear: input.birthYear,
       deathYear: input.deathYear,
       causeOfDeath: input.causeOfDeath,
       culture: input.culture,
       religion: input.religion,
-      traits: input.traits || [],
+      traits: input.traits ?? [],
       speechTells: input.speechTells,
       currentObsession: input.currentObsession,
-      formativeScars: input.formativeScars || [],
-      activeGrudges: input.activeGrudges || [],
+      formativeScars: input.formativeScars ?? [],
+      activeGrudges: resolvedGrudges ?? [],
       historyLog,
       createdAt: now,
       updatedAt: now,
@@ -265,5 +277,15 @@ export function deleteCharacter(storage: Storage, id: string) {
   }
   const deleted = storage.characters.splice(index, 1)[0];
   storage.scheduleWrite('characters');
+
+  // Clean up orphaned relationship edges
+  const initialRelCount = storage.relationships.length;
+  storage.relationships = storage.relationships.filter(
+    (r) => !(r.campaignId === activeId && (r.fromId === id || r.toId === id))
+  );
+  if (storage.relationships.length !== initialRelCount) {
+    storage.scheduleWrite('relationships');
+  }
+
   return { success: true, message: `Deleted character '${deleted.name}' (${deleted.id}).` };
 }

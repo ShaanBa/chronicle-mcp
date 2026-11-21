@@ -70,7 +70,18 @@ function loadData() {
   // Filter entity collections by target campaign ID
   const filtered = {
     campaign: targetCampaign,
-    characters: raw.characters.filter((c) => c.campaignId === campaignId),
+    characters: raw.characters.filter((c) => c.campaignId === campaignId).map((c) => {
+      const copy = { ...c };
+      if (typeof c.birthYear === 'number') {
+        if (c.status === 'dead' && typeof c.deathYear === 'number') {
+          copy.ageAtDeath = c.deathYear - c.birthYear;
+          copy.computedAge = copy.ageAtDeath;
+        } else if (c.status === 'alive' && targetCampaign && typeof targetCampaign.currentSortYear === 'number') {
+          copy.computedAge = targetCampaign.currentSortYear - c.birthYear;
+        }
+      }
+      return copy;
+    }),
     timeline: raw.timeline.filter((e) => e.campaignId === campaignId),
     tomes: raw.tomes.filter((t) => t.campaignId === campaignId),
     relationships: raw.relationships.filter((r) => r.campaignId === campaignId),
@@ -471,7 +482,7 @@ const htmlContent = `<!DOCTYPE html>
 <script>
 (function(){
   // Embedded Static Campaign Data
-  const CHRONICLE_DATA = ${JSON.stringify(data, null, 2)};
+  const CHRONICLE_DATA = ${JSON.stringify(data, null, 2).replace(/</g, '\\u003c')};
 
   let state = {
     campaign: CHRONICLE_DATA.campaign,
@@ -721,8 +732,17 @@ const htmlContent = `<!DOCTYPE html>
       const metaRow = [];
       metaRow.push(statusDot(entry.status) + escapeHtml(entry.status||'unknown'));
       if(entry.house) metaRow.push(escapeHtml(entry.house));
-      if(typeof entry.computedAge === 'number') metaRow.push('Age ' + entry.computedAge);
-      else if(typeof entry.ageAtDeath === 'number') metaRow.push('Died at Age ' + entry.ageAtDeath);
+      let ageStr = null;
+      if(typeof entry.computedAge === 'number') ageStr = 'Age ' + entry.computedAge;
+      else if(typeof entry.ageAtDeath === 'number') ageStr = 'Died at Age ' + entry.ageAtDeath;
+      else if(typeof entry.birthYear === 'number') {
+        if(entry.status === 'dead' && typeof entry.deathYear === 'number') {
+          ageStr = 'Died at Age ' + (entry.deathYear - entry.birthYear);
+        } else if(state.campaign && typeof state.campaign.currentSortYear === 'number') {
+          ageStr = 'Age ' + (state.campaign.currentSortYear - entry.birthYear);
+        }
+      }
+      if(ageStr) metaRow.push(ageStr);
       if(entry.culture) metaRow.push(escapeHtml(entry.culture));
       if(entry.religion) metaRow.push(escapeHtml(entry.religion));
 
@@ -734,6 +754,9 @@ const htmlContent = `<!DOCTYPE html>
       }
       if(entry.titles && entry.titles.length > 0) {
         html += \`<div class="field-block"><div class="field-label">Titles & Honours</div><div class="field-value">\${entry.titles.map(t => \`<span class="tag-pill" style="background:rgba(169,129,44,0.18); color:var(--gold);">\${escapeHtml(t)}</span>\`).join('')}</div></div>\`;
+      }
+      if(entry.traits && entry.traits.length > 0) {
+        html += \`<div class="field-block"><div class="field-label">Character Traits</div><div class="field-value">\${entry.traits.map(t => \`<span class="tag-pill" style="background:rgba(59,74,50,0.18); color:var(--forest); font-weight:600;">\${escapeHtml(t)}</span>\`).join('')}</div></div>\`;
       }
 
       if(entry.currentObsession) {
@@ -775,21 +798,19 @@ const htmlContent = `<!DOCTYPE html>
         html += \`<div class="field-block"><div class="field-label">Active Grudges</div><div class="field-value">\${grudgesHtml}</div></div>\`;
       }
 
-      // Relationships
-      const charRels = state.relationships.filter(r => r.fromId === entry.id || r.toId === entry.id);
+      // Relationships (directed outward edges from this character to eliminate duplicates)
+      const charRels = state.relationships.filter(r => r.fromId === entry.id);
       const visibleRels = state.omniscientMode ? charRels : charRels.filter(r => !r.isSecret);
       if(visibleRels.length > 0) {
         const relsHtml = visibleRels.map(r => {
-          const otherId = r.fromId === entry.id ? r.toId : r.fromId;
-          const otherName = resolveCharName(otherId);
-          const isForward = r.fromId === entry.id;
+          const otherName = resolveCharName(r.toId);
           const secretBadge = r.isSecret ? '<span class="severity-pill severity-dynasty_ending">[Covert]</span> ' : '';
           const sentimentBadge = (r.sentiment !== undefined) ? \`<span class="tag-pill" style="background:rgba(43,33,21,0.08);">Sentiment: \${r.sentiment > 0 ? '+' : ''}\${r.sentiment}</span>\` : '';
           const facadeStr = r.publicFacade ? \`<span style="font-style:italic; color:var(--ink-soft);"> (Facade: "\${escapeHtml(r.publicFacade)}")</span>\` : '';
           const noteStr = r.note ? \`<div style="font-size:13px; color:var(--ink-soft); margin-top:3px;">\${escapeHtml(r.note)}</div>\` : '';
 
           return \`<div class="relationship-card \${r.isSecret ? 'rel-secret' : ''}">
-            \${secretBadge}<strong>\${escapeHtml(r.type)}</strong> \${isForward ? 'towards' : 'from'} <strong>\${escapeHtml(otherName)}</strong> \${sentimentBadge}\${facadeStr}
+            \${secretBadge}<strong>\${escapeHtml(r.type)}</strong> towards <strong>\${escapeHtml(otherName)}</strong> \${sentimentBadge}\${facadeStr}
             \${noteStr}
           </div>\`;
         }).join('');

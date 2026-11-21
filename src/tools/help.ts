@@ -124,7 +124,7 @@ export const CHRONICLE_COMMANDS: CommandHelp[] = [
     category: 'Timeline',
     summary: 'Log a new narrative & mechanical event to the timeline.',
     description: 'Logs a historical event to the timeline and automatically synchronizes event notes into tagged characters in the active campaign.',
-    usageExample: 'chronicle/log_timeline_event { entry: { title: "Battle of Maidenpool", date: "8023", narrative: "...", mechanicalOutcome: "..." } }',
+    usageExample: 'chronicle/log_timeline_event { entry: { title: "Battle of Maidenpool", date: "8023", narrative: "...", mechanicalOutcome: { summary: "Decisive victory: +100 prestige" } } }',
   },
   {
     name: 'update_timeline_entry',
@@ -228,7 +228,7 @@ export const CHRONICLE_COMMANDS: CommandHelp[] = [
     category: 'Houses',
     summary: 'Create or update a noble house.',
     description: 'Inserts or updates a noble house record in the active campaign.',
-    usageExample: 'chronicle/upsert_house { house: { name: "House Mooton", motto: "Wisdom and Strength" } }',
+    usageExample: 'chronicle/upsert_house { house: { name: "House Mooton", words: "Wisdom and Strength" } }',
   },
   {
     name: 'delete_house',
