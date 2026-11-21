@@ -1,0 +1,46 @@
+# Node dependencies
+node_modules/
+
+# Build outputs
+/build/
+/dist/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment & Secrets & Local Configs
+.env
+.env.*
+!.env.example
+ecosystem.config.js
+ecosystem*.js
+pm2*.json
+
+# Service Install Scripts with local secrets
+scripts/*.bat
+scripts/*.ps1
+scripts/test-http-auth.js
+
+# Campaign data & Personal Lore
+/data/
+/data-*/
+/data-backup*/
+chronicle.json
+chronicle-viewer*.html
+/raw-export/
+*REPORT*.md
+*.html
+/query
+
+# Binaries & External Tools (root folder only)
+/tools/
+
+# Agent & IDE & OS files
+/.agents/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

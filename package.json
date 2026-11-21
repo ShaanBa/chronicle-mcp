@@ -1,0 +1,23 @@
+{
+  "name": "chronicle-mcp",
+  "version": "1.0.0",
+  "description": "Local MCP server for CK2 tabletop RP campaign memory",
+  "main": "build/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js",
+    "dev": "tsx src/index.ts",
+    "test:smoke": "tsx scripts/smoke-test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.0",
+    "agy": "^0.0.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
