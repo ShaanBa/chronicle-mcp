@@ -107,7 +107,8 @@ export function addRelationship(
       }
       if (input.isSecret === true) {
         inverseEdge.isSecret = true; // secret relationship always stamps both edges
-      } else if (!input.oneWay) {
+      }
+      if (!input.oneWay) {
         if (input.isSecret !== undefined) inverseEdge.isSecret = input.isSecret;
         if (input.sentiment !== undefined) inverseEdge.sentiment = input.sentiment;
         if (input.publicFacade !== undefined) inverseEdge.publicFacade = input.publicFacade;

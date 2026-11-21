@@ -1211,6 +1211,23 @@ toolSequence:
     assert(omniscientB.relationships[0].isSecret === true, 'Inverse edge has isSecret: true');
     assert(omniscientB.relationships[0].sentiment === 40, 'Inverse edge has sentiment: 40');
     assert(omniscientB.relationships[0].publicFacade === 'Vicious rivals', 'Inverse edge has publicFacade');
+
+    // Update existing mutual secret edge: sentiment & publicFacade must mirror to inverse
+    addRelationship(storage, {
+      fromType: 'character',
+      fromId: secretRelCharA,
+      toType: 'character',
+      toId: secretRelCharB,
+      type: 'ally',
+      isSecret: true,
+      sentiment: 85,
+      publicFacade: 'Bitter sworn foes',
+    });
+
+    const updatedOmniscientB = listRelationships(storage, 'character', secretRelCharB, true);
+    assert(updatedOmniscientB.relationships[0].sentiment === 85, 'Inverse edge updated sentiment: 85');
+    assert(updatedOmniscientB.relationships[0].publicFacade === 'Bitter sworn foes', 'Inverse edge updated publicFacade');
+    assert(updatedOmniscientB.relationships[0].isSecret === true, 'Inverse edge preserves isSecret: true');
   });
 
   // 32. Exposed Secrets Excluded from gmGuardrail and activeLeverage

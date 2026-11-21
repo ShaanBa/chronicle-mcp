@@ -295,6 +295,12 @@ const server = http.createServer(async (req: IncomingMessage, res: ServerRespons
         return;
       }
 
+      if (!['http:', 'https:'].includes(targetUrl.protocol)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid_request', error_description: 'redirect_uri must use http or https scheme' }));
+        return;
+      }
+
       // Prune expired auth codes before inserting new entry
       const nowMs = Date.now();
       for (const [k, v] of authCodes.entries()) {
