@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { Character, TimelineEntry, Tome, RelationshipEdge, Thread, House, Campaign } from './schema.js';
+import { Character, TimelineEntry, Tome, RelationshipEdge, Thread, House, Campaign, Secret } from './schema.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,7 +18,8 @@ export type StorageCollection =
   | 'threads'
   | 'houses'
   | 'campaigns'
-  | 'activeCampaign';
+  | 'activeCampaign'
+  | 'secrets';
 
 export class Storage {
   private dataDir: string;
@@ -30,6 +31,7 @@ export class Storage {
   private housesFile: string;
   private campaignsFile: string;
   private activeCampaignFile: string;
+  private secretsFile: string;
 
   public characters: Character[] = [];
   public timeline: TimelineEntry[] = [];
@@ -38,6 +40,7 @@ export class Storage {
   public threads: Thread[] = [];
   public houses: House[] = [];
   public campaigns: Campaign[] = [];
+  public secrets: Secret[] = [];
   public activeCampaignId: string = 'campaign-semien';
 
   private writeTimers: Record<StorageCollection, NodeJS.Timeout | null> = {
@@ -49,6 +52,7 @@ export class Storage {
     houses: null,
     campaigns: null,
     activeCampaign: null,
+    secrets: null,
   };
 
   private pendingWrites: Set<StorageCollection> = new Set();
@@ -65,6 +69,7 @@ export class Storage {
     this.housesFile = path.join(this.dataDir, 'houses.json');
     this.campaignsFile = path.join(this.dataDir, 'campaigns.json');
     this.activeCampaignFile = path.join(this.dataDir, 'active-campaign.json');
+    this.secretsFile = path.join(this.dataDir, 'secrets.json');
 
     this.init();
     this.setupExitHooks();
@@ -122,6 +127,7 @@ export class Storage {
     this.relationships = this.loadFile<RelationshipEdge>(this.relationshipsFile, 'relationships.json');
     this.threads = this.loadFile<Thread>(this.threadsFile, 'threads.json');
     this.houses = this.loadFile<House>(this.housesFile, 'houses.json');
+    this.secrets = this.loadFile<Secret>(this.secretsFile, 'secrets.json');
   }
 
   private loadFile<T>(filePath: string, filename: string): T[] {
@@ -285,6 +291,10 @@ export class Storage {
         targetPath = this.activeCampaignFile;
         data = { activeCampaignId: this.activeCampaignId };
         break;
+      case 'secrets':
+        targetPath = this.secretsFile;
+        data = this.secrets;
+        break;
     }
 
     try {
@@ -307,6 +317,7 @@ export class Storage {
       'houses',
       'campaigns',
       'activeCampaign',
+      'secrets',
     ] as const) {
       this.flushWrite(type);
     }
@@ -327,4 +338,92 @@ export class Storage {
       process.exit(0);
     });
   }
+}
+
+/**
+ * Shared entity resolver helper:
+ * 1. Exact ID match within campaignId.
+ * 2. Case-insensitive exact name match.
+ * 3. Unambiguous substring match (e.g. "Raymund" -> "Lord Raymund Mooton" only if exactly 1 match).
+ * If ambiguous or no match, preserves the original string.
+ */
+export function resolveEntityRef(
+  storage: Storage,
+  campaignId: string,
+  type: 'character' | 'house' | 'any',
+  idOrName: string
+): string {
+  const query = idOrName?.trim();
+  if (!query) return idOrName;
+
+  // 1. Exact ID match within campaign
+  if (type === 'character' || type === 'any') {
+    const charById = storage.characters.find(c => c.campaignId === campaignId && c.id === query);
+    if (charById) return charById.id;
+  }
+  if (type === 'house' || type === 'any') {
+    const houseById = storage.houses.find(h => h.campaignId === campaignId && h.id === query);
+    if (houseById) return houseById.id;
+  }
+
+  const queryLower = query.toLowerCase();
+
+  // 2. Case-insensitive exact name match
+  if (type === 'character' || type === 'any') {
+    const charByName = storage.characters.find(c => c.campaignId === campaignId && c.name.toLowerCase() === queryLower);
+    if (charByName) return charByName.id;
+  }
+  if (type === 'house' || type === 'any') {
+    const houseByName = storage.houses.find(h => h.campaignId === campaignId && h.name.toLowerCase() === queryLower);
+    if (houseByName) return houseByName.id;
+  }
+
+  // 3. Unambiguous substring match within campaign
+  let matchingChars: Character[] = [];
+  if (type === 'character' || type === 'any') {
+    matchingChars = storage.characters.filter(
+      c => c.campaignId === campaignId && c.name.toLowerCase().includes(queryLower)
+    );
+  }
+  let matchingHouses: House[] = [];
+  if (type === 'house' || type === 'any') {
+    matchingHouses = storage.houses.filter(
+      h => h.campaignId === campaignId && h.name.toLowerCase().includes(queryLower)
+    );
+  }
+
+  const totalMatches = matchingChars.length + matchingHouses.length;
+  if (totalMatches === 1) {
+    return matchingChars.length === 1 ? matchingChars[0].id : matchingHouses[0].id;
+  }
+
+  if (totalMatches > 1) {
+    console.warn(`[chronicle-mcp] Ambiguous reference '${query}' matches multiple entities in campaign ${campaignId}. Preserving raw string.`);
+  }
+
+  // No unambiguous match, preserve raw string
+  return query;
+}
+
+export function resolveCharacterRef(
+  storage: Storage,
+  campaignId: string,
+  idOrName: string
+): string {
+  return resolveEntityRef(storage, campaignId, 'character', idOrName);
+}
+
+/**
+ * Computes computedAge or ageAtDeath on read based on campaign currentSortYear and character birthYear/deathYear.
+ */
+export function attachComputedAge(character: Character, campaign?: Campaign): Character {
+  const copy = { ...character };
+  if (campaign && typeof campaign.currentSortYear === 'number' && typeof character.birthYear === 'number') {
+    if (character.status === 'alive') {
+      copy.computedAge = campaign.currentSortYear - character.birthYear;
+    } else if (character.status === 'dead' && typeof character.deathYear === 'number') {
+      copy.ageAtDeath = character.deathYear - character.birthYear;
+    }
+  }
+  return copy;
 }
