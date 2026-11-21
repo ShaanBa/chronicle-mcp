@@ -56,6 +56,7 @@ export function logTimelineEvent(
     campaignId: activeId,
     title: input.title,
     date: input.date,
+    sortYear: input.sortYear,
     tags: input.tags || [],
     narrative: input.narrative,
     mechanicalOutcome: input.mechanicalOutcome,
@@ -103,7 +104,35 @@ export function logTimelineEvent(
     }
   }
 
-  return { success: true, entry: newEntry };
+  // Smart Nudge Hints: check for cultural echo or intrigue opportunities
+  const suggestions: string[] = [];
+  const narrativeLower = (input.narrative || '').toLowerCase();
+  const titleLower = (input.title || '').toLowerCase();
+  const outcome = input.mechanicalOutcome;
+
+  if (outcome) {
+    const hasCasualties = Boolean(outcome.casualties);
+    const hasTerritory = Boolean(outcome.territoryChange);
+    const largePrestige = Math.abs(outcome.prestigeDelta || 0) >= 100;
+    if (hasCasualties || hasTerritory || largePrestige) {
+      suggestions.push(
+        'Major outcome detected: Consider authoring a short biased Tome (ballad, letter, or decree) with upsert_tome to capture the cultural echo.'
+      );
+    }
+  }
+
+  const intrigueRegex = /\b(secret|poison|murder|assassin|bastard|conspiracy|bribe|forged|forgery|plot|treason|covert|leverage)\b/i;
+  if (intrigueRegex.test(narrativeLower) || intrigueRegex.test(titleLower)) {
+    suggestions.push(
+      'Intrigue keywords detected: Consider recording a corresponding Secret with upsert_secret to track hidden truth, cover stories, and leverage separately from public history.'
+    );
+  }
+
+  return {
+    success: true,
+    entry: newEntry,
+    ...(suggestions.length > 0 ? { suggestions } : {}),
+  };
 }
 
 export function updateTimelineEntry(
@@ -122,6 +151,7 @@ export function updateTimelineEntry(
     ...existing,
     title: patch.title ?? existing.title,
     date: patch.date ?? existing.date,
+    sortYear: patch.sortYear ?? existing.sortYear,
     tags: patch.tags ?? existing.tags,
     narrative: patch.narrative ?? existing.narrative,
     mechanicalOutcome: patch.mechanicalOutcome ?? existing.mechanicalOutcome,

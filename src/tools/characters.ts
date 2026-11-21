@@ -1,4 +1,4 @@
-import { Storage, generateId } from '../storage.js';
+import { Storage, generateId, attachComputedAge } from '../storage.js';
 import { Character, CharacterSchema, HistoryLogEntry } from '../schema.js';
 import { z } from 'zod';
 
@@ -6,7 +6,8 @@ export function listCharacters(
   storage: Storage,
   filter?: { status?: string; house?: string; tag?: string }
 ) {
-  const activeId = storage.activeCampaignId;
+  const activeCamp = storage.getActiveCampaign();
+  const activeId = activeCamp.id;
   let chars = storage.characters.filter((c) => c.campaignId === activeId);
 
   if (filter?.status) {
@@ -24,15 +25,26 @@ export function listCharacters(
     chars = chars.filter((c) => c.tags.some((t) => t.toLowerCase() === tagLower));
   }
 
-  const summaries = chars.map((c) => ({
-    id: c.id,
-    campaignId: c.campaignId,
-    name: c.name,
-    house: c.house,
-    status: c.status,
-    tags: c.tags,
-    historyCount: (c.historyLog || []).length,
-  }));
+  const summaries = chars.map((c) => {
+    const enriched = attachComputedAge(c, activeCamp);
+    return {
+      id: enriched.id,
+      campaignId: enriched.campaignId,
+      name: enriched.name,
+      epithet: enriched.epithet,
+      titles: enriched.titles || [],
+      house: enriched.house,
+      status: enriched.status,
+      computedAge: enriched.computedAge,
+      ageAtDeath: enriched.ageAtDeath,
+      culture: enriched.culture,
+      religion: enriched.religion,
+      traits: enriched.traits || [],
+      currentObsession: enriched.currentObsession,
+      tags: enriched.tags,
+      historyCount: (enriched.historyLog || []).length,
+    };
+  });
 
   return {
     success: true,
@@ -68,13 +80,14 @@ export function findCharacterByName(storage: Storage, name: string) {
 }
 
 export function getCharacter(storage: Storage, nameOrId: string) {
-  const activeId = storage.activeCampaignId;
+  const activeCamp = storage.getActiveCampaign();
+  const activeId = activeCamp.id;
   const query = nameOrId.trim();
 
   // 1. Exact ID match scoped to active campaign
   const byId = storage.characters.find((c) => c.id === query && c.campaignId === activeId);
   if (byId) {
-    return { success: true, character: byId };
+    return { success: true, character: attachComputedAge(byId, activeCamp) };
   }
 
   // 2. Case-insensitive name match scoped to active campaign
@@ -84,7 +97,7 @@ export function getCharacter(storage: Storage, nameOrId: string) {
   );
 
   if (nameMatches.length === 1) {
-    return { success: true, character: nameMatches[0] };
+    return { success: true, character: attachComputedAge(nameMatches[0], activeCamp) };
   } else if (nameMatches.length > 1) {
     return {
       success: false,
@@ -99,7 +112,7 @@ export function getCharacter(storage: Storage, nameOrId: string) {
     (c) => c.campaignId === activeId && c.name.toLowerCase().includes(queryLower)
   );
   if (substringMatches.length === 1) {
-    return { success: true, character: substringMatches[0] };
+    return { success: true, character: attachComputedAge(substringMatches[0], activeCamp) };
   } else if (substringMatches.length > 1) {
     return {
       success: false,
@@ -116,7 +129,8 @@ export function upsertCharacter(
   storage: Storage,
   input: z.infer<typeof CharacterSchema>
 ) {
-  const activeId = storage.activeCampaignId;
+  const activeCamp = storage.getActiveCampaign();
+  const activeId = activeCamp.id;
   const now = Date.now();
   let existingIndex = -1;
 
@@ -158,6 +172,18 @@ export function upsertCharacter(
       ...input,
       id: existing.id,
       campaignId: existing.campaignId,
+      epithet: input.epithet ?? existing.epithet,
+      titles: input.titles && input.titles.length > 0 ? input.titles : (existing.titles || []),
+      birthYear: input.birthYear ?? existing.birthYear,
+      deathYear: input.deathYear ?? existing.deathYear,
+      causeOfDeath: input.causeOfDeath ?? existing.causeOfDeath,
+      culture: input.culture ?? existing.culture,
+      religion: input.religion ?? existing.religion,
+      traits: input.traits && input.traits.length > 0 ? input.traits : (existing.traits || []),
+      speechTells: input.speechTells ?? existing.speechTells,
+      currentObsession: input.currentObsession ?? existing.currentObsession,
+      formativeScars: input.formativeScars && input.formativeScars.length > 0 ? input.formativeScars : (existing.formativeScars || []),
+      activeGrudges: input.activeGrudges && input.activeGrudges.length > 0 ? input.activeGrudges : (existing.activeGrudges || []),
       historyLog,
       createdAt: existing.createdAt,
       updatedAt: now,
@@ -165,7 +191,7 @@ export function upsertCharacter(
 
     storage.characters[existingIndex] = updated;
     storage.scheduleWrite('characters');
-    return { success: true, character: updated };
+    return { success: true, character: attachComputedAge(updated, activeCamp) };
   } else {
     const newId = generateId();
     const historyLog: HistoryLogEntry[] = [];
@@ -208,6 +234,18 @@ export function upsertCharacter(
       modernAnalogue: input.modernAnalogue,
       relationships: input.relationships,
       trajectory: input.trajectory,
+      epithet: input.epithet,
+      titles: input.titles || [],
+      birthYear: input.birthYear,
+      deathYear: input.deathYear,
+      causeOfDeath: input.causeOfDeath,
+      culture: input.culture,
+      religion: input.religion,
+      traits: input.traits || [],
+      speechTells: input.speechTells,
+      currentObsession: input.currentObsession,
+      formativeScars: input.formativeScars || [],
+      activeGrudges: input.activeGrudges || [],
       historyLog,
       createdAt: now,
       updatedAt: now,
@@ -215,7 +253,7 @@ export function upsertCharacter(
 
     storage.characters.push(created);
     storage.scheduleWrite('characters');
-    return { success: true, character: created };
+    return { success: true, character: attachComputedAge(created, activeCamp) };
   }
 }
 

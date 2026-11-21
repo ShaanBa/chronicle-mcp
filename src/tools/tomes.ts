@@ -1,10 +1,16 @@
-import { Storage, generateId } from '../storage.js';
-import { Tome, TomeSchema } from '../schema.js';
+import { Storage, generateId, resolveCharacterRef } from '../storage.js';
+import { Tome, TomeSchema, TomeSourceType, TomeReliability } from '../schema.js';
 import { z } from 'zod';
 
 export function listTomes(
   storage: Storage,
-  filter?: { category?: string; tag?: string }
+  filter?: {
+    category?: string;
+    tag?: string;
+    sourceType?: TomeSourceType;
+    reliability?: TomeReliability;
+    relatedCharacterId?: string;
+  }
 ) {
   const activeId = storage.activeCampaignId;
   let tomes = storage.tomes.filter((t) => t.campaignId === activeId);
@@ -23,10 +29,33 @@ export function listTomes(
     );
   }
 
+  if (filter?.sourceType) {
+    tomes = tomes.filter((t) => (t.sourceType || 'chronicle') === filter.sourceType);
+  }
+
+  if (filter?.reliability) {
+    tomes = tomes.filter((t) => (t.reliability || 'true') === filter.reliability);
+  }
+
+  if (filter?.relatedCharacterId) {
+    const resolvedCharId = resolveCharacterRef(storage, activeId, filter.relatedCharacterId);
+    tomes = tomes.filter(
+      (t) =>
+        (t.relatedCharacterIds || []).includes(resolvedCharId) ||
+        t.tags.some((tg) => tg.toLowerCase() === filter.relatedCharacterId!.toLowerCase())
+    );
+  }
+
   const summaries = tomes.map((t) => ({
     id: t.id,
     title: t.title,
     category: t.category,
+    sourceType: t.sourceType || 'chronicle',
+    reliability: t.reliability || 'true',
+    inWorldAuthor: t.inWorldAuthor,
+    inGameDate: t.inGameDate,
+    relatedCharacterIds: t.relatedCharacterIds || [],
+    relatedEventIds: t.relatedEventIds || [],
     tags: t.tags,
   }));
 
@@ -120,6 +149,11 @@ export function upsertTome(
     }
   }
 
+  // Resolve related character IDs
+  const resolvedRelatedChars = (input.relatedCharacterIds || []).map((ref) =>
+    resolveCharacterRef(storage, activeId, ref)
+  );
+
   if (existingIndex >= 0) {
     const existing = storage.tomes[existingIndex];
     const updated: Tome = {
@@ -127,6 +161,12 @@ export function upsertTome(
       ...input,
       id: existing.id,
       campaignId: existing.campaignId,
+      sourceType: input.sourceType ?? existing.sourceType ?? 'chronicle',
+      inWorldAuthor: input.inWorldAuthor ?? existing.inWorldAuthor,
+      inGameDate: input.inGameDate ?? existing.inGameDate,
+      reliability: input.reliability ?? existing.reliability ?? 'true',
+      relatedCharacterIds: resolvedRelatedChars.length > 0 ? resolvedRelatedChars : (existing.relatedCharacterIds || []),
+      relatedEventIds: input.relatedEventIds ?? (existing.relatedEventIds || []),
       createdAt: existing.createdAt,
       updatedAt: now,
     };
@@ -140,6 +180,12 @@ export function upsertTome(
       campaignId: activeId,
       title: input.title,
       category: input.category,
+      sourceType: input.sourceType || 'chronicle',
+      inWorldAuthor: input.inWorldAuthor,
+      inGameDate: input.inGameDate,
+      reliability: input.reliability || 'true',
+      relatedCharacterIds: resolvedRelatedChars,
+      relatedEventIds: input.relatedEventIds || [],
       tags: input.tags || [],
       content: input.content,
       createdAt: now,

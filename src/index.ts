@@ -8,6 +8,7 @@ import {
   createCampaign,
   setActiveCampaign,
   getActiveCampaign,
+  updateRealmPulse,
 } from './tools/campaigns.js';
 import {
   listCharacters,
@@ -54,6 +55,15 @@ import {
   getRealmRecap,
 } from './tools/search.js';
 import {
+  upsertSecret,
+  updateSecretKnowledge,
+  listSecrets,
+  getCharacterKnowledge,
+} from './tools/secrets.js';
+import {
+  getSceneBriefing,
+} from './tools/director.js';
+import {
   listCommands,
 } from './tools/help.js';
 import {
@@ -64,6 +74,9 @@ import {
   RelationshipEdgeSchema,
   ThreadSchema,
   HouseSchema,
+  SecretSchema,
+  CampaignPulseUpdateSchema,
+  SceneBriefingInputSchema,
 } from './schema.js';
 
 export function createChronicleServer(): Server {
@@ -131,6 +144,36 @@ export function createChronicleServer(): Server {
           inputSchema: {
             type: 'object',
             properties: {},
+          },
+        },
+        {
+          name: 'update_realm_pulse',
+          description:
+            'Update campaign setting, current date, sort year anchor, era, active player character, or realmMood (atmosphere, stability, crises, smallfolk whispers).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              campaignId: { type: 'string', description: 'Optional campaign ID (defaults to active)' },
+              setting: { type: 'string', description: 'Setting description, e.g. "Westeros - AGoT"' },
+              currentDate: { type: 'string', description: 'Display date, e.g. "289 AC, Late Autumn"' },
+              currentSortYear: { type: 'number', description: 'Numeric year anchor for age & chronological math' },
+              currentEra: { type: 'string', description: 'Current era, e.g. "The Long Regency"' },
+              playerCharacterId: { type: 'string', description: 'Name or ID of active POV ruler/character' },
+              realmMood: {
+                type: 'object',
+                properties: {
+                  atmosphere: { type: 'string' },
+                  stability: { type: 'string', enum: ['stable', 'uneasy', 'volatile', 'fracturing'] },
+                  seasonOrWeather: { type: 'string' },
+                  activeCrises: { type: 'array', items: { type: 'string' } },
+                  smallfolkWhispers: { type: 'array', items: { type: 'string' } },
+                },
+              },
+              addWhisper: { type: 'string', description: 'Convenience shortcut to append a single rumor' },
+              retireWhisper: { type: 'string', description: 'Convenience shortcut to remove an outdated rumor' },
+              addCrisis: { type: 'string', description: 'Convenience shortcut to add a crisis pressure' },
+              resolveCrisis: { type: 'string', description: 'Convenience shortcut to resolve a crisis' },
+            },
           },
         },
 
@@ -559,11 +602,108 @@ export function createChronicleServer(): Server {
           },
         },
 
+        // Secret & Intrigue Tools
+        {
+          name: 'upsert_secret',
+          description:
+            'Create or update a secret, hidden conspiracy, or leverage point in the active campaign.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'Optional secret ID for updates' },
+              title: { type: 'string', description: 'Short handle, e.g. "Perwyn\'s True Killer"' },
+              truth: { type: 'string', description: 'Objective ground truth' },
+              publicCoverStory: { type: 'string', description: 'Official narrative believed by the realm' },
+              severity: { type: 'string', enum: ['gossip', 'scandal', 'treason', 'dynasty_ending'] },
+              status: { type: 'string', enum: ['buried', 'whispered', 'exposed', 'discredited'] },
+              subjectIds: { type: 'array', items: { type: 'string' }, description: 'Characters or Houses implicated/affected' },
+              knownByCharacterIds: { type: 'array', items: { type: 'string' }, description: 'Characters with proof or direct knowledge' },
+              suspectedByCharacterIds: { type: 'array', items: { type: 'string' }, description: 'Characters who have partial clues or suspicions' },
+              leverageNote: { type: 'string', description: 'Concrete fallout or leverage if exposed' },
+              relatedEventIds: { type: 'array', items: { type: 'string' } },
+              tags: { type: 'array', items: { type: 'string' } },
+              note: { type: 'string', description: 'Optional historyLog entry note' },
+              date: { type: 'string' },
+              campaignId: { type: 'string' },
+            },
+            required: ['title', 'truth'],
+          },
+        },
+        {
+          name: 'update_secret_knowledge',
+          description:
+            'Atomic intrigue transition: Character learns, suspects, forgets, or exposes a secret.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              secretId: { type: 'string', description: 'Secret ID or exact title' },
+              characterId: { type: 'string', description: 'Character name or ID' },
+              action: { type: 'string', enum: ['learns', 'suspects', 'forgets', 'exposes'] },
+              date: { type: 'string' },
+              note: { type: 'string' },
+              autoLogTimelineEvent: { type: 'boolean', description: 'When exposing, automatically log a public timeline event' },
+              campaignId: { type: 'string' },
+            },
+            required: ['secretId', 'characterId', 'action'],
+          },
+        },
+        {
+          name: 'list_secrets',
+          description:
+            'Query secrets with filters (status, severity, subject, knower) with names resolved for clean LLM readability.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              status: { type: 'string', enum: ['buried', 'whispered', 'exposed', 'discredited'] },
+              severity: { type: 'string', enum: ['gossip', 'scandal', 'treason', 'dynasty_ending'] },
+              subjectId: { type: 'string', description: 'Filter by character/house implicated' },
+              knownByCharacterId: { type: 'string', description: 'Filter by character with direct knowledge' },
+              unexposedOnly: { type: 'boolean', description: 'Filter to secrets not yet publicly exposed' },
+              campaignId: { type: 'string' },
+            },
+          },
+        },
+        {
+          name: 'get_character_knowledge',
+          description:
+            'Anti-metagaming lens: retrieve what a character knows, suspects, and blind spots without leaking unexposed truths.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              characterId: { type: 'string', description: 'Character name or ID' },
+              campaignId: { type: 'string' },
+            },
+            required: ['characterId'],
+          },
+        },
+
+        // Director & Staging Tools
+        {
+          name: 'get_scene_briefing',
+          description:
+            'Director Engine: generate a dense, curated scene briefing before roleplay scenes. Computes cast cards, in-room relationships, grudges, atmosphere, and the Intrigue Matrix (active leverage, shared conspiracies, and anti-metagaming GM guardrails).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              characterIds: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Names or IDs of characters present in the scene',
+              },
+              locationName: { type: 'string', description: 'Holding or location name' },
+              povCharacterId: { type: 'string', description: 'POV character name or ID (defaults to active player character)' },
+              includeOmniscientSecrets: { type: 'boolean', description: 'Include secrets unknown to room cast for GM perspective (default true)' },
+              campaignId: { type: 'string' },
+            },
+            required: ['characterIds'],
+          },
+        },
+
         // Search & Recap Tools
         {
           name: 'search_chronicle',
           description:
-            'Perform a global search across active campaign records.',
+            'Perform a global search across active campaign records (characters, timeline, tomes, threads, houses, secrets).',
           inputSchema: {
             type: 'object',
             properties: {
@@ -572,8 +712,12 @@ export function createChronicleServer(): Server {
                 type: 'array',
                 items: {
                   type: 'string',
-                  enum: ['characters', 'timeline', 'tomes', 'threads', 'houses'],
+                  enum: ['characters', 'timeline', 'tomes', 'threads', 'houses', 'secrets'],
                 },
+              },
+              includeSecrets: {
+                type: 'boolean',
+                description: 'Whether to include hidden secrets (default true; set false for in-world public archive search)',
               },
             },
             required: ['query'],
@@ -631,6 +775,11 @@ export function createChronicleServer(): Server {
           const res = getActiveCampaign(storage);
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
+        case 'update_realm_pulse': {
+          const parsed = CampaignPulseUpdateSchema.parse(args);
+          const res = updateRealmPulse(storage, parsed);
+          return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
+        }
 
         // Character Tools
         case 'list_characters': {
@@ -648,7 +797,8 @@ export function createChronicleServer(): Server {
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
         case 'upsert_character': {
-          const parsed = CharacterSchema.parse((args as any)?.character);
+          const rawChar = (args as any)?.character || args;
+          const parsed = CharacterSchema.parse(rawChar);
           const res = upsertCharacter(storage, parsed);
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
@@ -669,7 +819,8 @@ export function createChronicleServer(): Server {
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
         case 'log_timeline_event': {
-          const parsed = TimelineEntrySchema.parse((args as any)?.entry);
+          const rawEntry = (args as any)?.entry || args;
+          const parsed = TimelineEntrySchema.parse(rawEntry);
           const res = logTimelineEvent(storage, parsed);
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
@@ -687,7 +838,7 @@ export function createChronicleServer(): Server {
 
         // Tome Tools
         case 'list_tomes': {
-          const res = listTomes(storage, (args as any)?.filter);
+          const res = listTomes(storage, (args as any)?.filter || args);
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
         case 'get_tome': {
@@ -701,7 +852,8 @@ export function createChronicleServer(): Server {
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
         case 'upsert_tome': {
-          const parsed = TomeSchema.parse((args as any)?.tome);
+          const rawTome = (args as any)?.tome || args;
+          const parsed = TomeSchema.parse(rawTome);
           const res = upsertTome(storage, parsed);
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
@@ -718,8 +870,12 @@ export function createChronicleServer(): Server {
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
         case 'list_relationships': {
-          const { entityType, entityId } = args as { entityType: 'character' | 'house'; entityId: string };
-          const res = listRelationships(storage, entityType, entityId);
+          const { entityType, entityId, includeSecrets } = args as {
+            entityType: 'character' | 'house';
+            entityId: string;
+            includeSecrets?: boolean;
+          };
+          const res = listRelationships(storage, entityType, entityId, includeSecrets !== false);
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
         case 'remove_relationship': {
@@ -739,7 +895,8 @@ export function createChronicleServer(): Server {
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
         case 'upsert_thread': {
-          const parsed = ThreadSchema.parse((args as any)?.thread);
+          const rawThread = (args as any)?.thread || args;
+          const parsed = ThreadSchema.parse(rawThread);
           const res = upsertThread(storage, parsed);
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
@@ -770,7 +927,8 @@ export function createChronicleServer(): Server {
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
         case 'upsert_house': {
-          const parsed = HouseSchema.parse((args as any)?.house);
+          const rawHouse = (args as any)?.house || args;
+          const parsed = HouseSchema.parse(rawHouse);
           const res = upsertHouse(storage, parsed);
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
@@ -780,13 +938,42 @@ export function createChronicleServer(): Server {
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
 
+        // Secret & Intrigue Tools
+        case 'upsert_secret': {
+          const rawSecret = (args as any)?.secret || args;
+          const parsed = SecretSchema.parse(rawSecret);
+          const res = upsertSecret(storage, parsed);
+          return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
+        }
+        case 'update_secret_knowledge': {
+          const res = updateSecretKnowledge(storage, args as any);
+          return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
+        }
+        case 'list_secrets': {
+          const res = listSecrets(storage, args as any);
+          return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
+        }
+        case 'get_character_knowledge': {
+          const { characterId, campaignId } = args as { characterId: string; campaignId?: string };
+          const res = getCharacterKnowledge(storage, { characterId, campaignId });
+          return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
+        }
+
+        // Director & Staging Tools
+        case 'get_scene_briefing': {
+          const parsed = SceneBriefingInputSchema.parse(args);
+          const res = getSceneBriefing(storage, parsed);
+          return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
+        }
+
         // Search & Recap Tools
         case 'search_chronicle': {
-          const { query, sections } = args as {
+          const { query, sections, includeSecrets } = args as {
             query: string;
-            sections?: ('characters' | 'timeline' | 'tomes' | 'threads' | 'houses')[];
+            sections?: ('characters' | 'timeline' | 'tomes' | 'threads' | 'houses' | 'secrets')[];
+            includeSecrets?: boolean;
           };
-          const res = searchChronicle(storage, query, sections);
+          const res = searchChronicle(storage, query, sections, includeSecrets !== false);
           return { content: [{ type: 'text', text: JSON.stringify(res, null, 2) }] };
         }
         case 'get_realm_recap': {

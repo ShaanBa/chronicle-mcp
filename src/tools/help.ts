@@ -36,6 +36,13 @@ export const CHRONICLE_COMMANDS: CommandHelp[] = [
     description: 'Creates a new campaign with a unique slug ID.',
     usageExample: 'chronicle/create_campaign { name: "Britannia" }',
   },
+  {
+    name: 'update_realm_pulse',
+    category: 'Campaigns',
+    summary: 'Update world state, current date/year, active crises, atmosphere, and smallfolk whispers.',
+    description: 'Nudges the atmospheric and chronological pulse of the campaign. Supports full realmMood replacement or lightweight one-liners (addWhisper, retireWhisper, addCrisis, resolveCrisis, currentDate, currentSortYear).',
+    usageExample: 'chronicle/update_realm_pulse { currentDate: "289 AC, Late Autumn", addWhisper: "They say tax collectors were attacked near the Trident." }',
+  },
 
   // Character Tools
   {
@@ -238,19 +245,58 @@ export const CHRONICLE_COMMANDS: CommandHelp[] = [
     usageExample: 'chronicle/delete_tome { id: "tome-123" }',
   },
 
+  // Secrets & Intrigue Tools
+  {
+    name: 'upsert_secret',
+    category: 'Secrets & Intrigue',
+    summary: 'Create or update a secret, hidden conspiracy, or leverage point.',
+    description: 'Tracks hidden ground truth, public cover stories, leverage notes, severity, status ("buried" | "whispered" | "exposed" | "discredited"), and character awareness (knownBy vs suspectedBy).',
+    usageExample: 'chronicle/upsert_secret { secret: { title: "The Forged Harbor Charter", truth: "Lord Raymund Mooton secretly diverted harbor taxes to Braavos.", publicCoverStory: "Storm losses reduced customs intake.", severity: "scandal" } }',
+  },
+  {
+    name: 'update_secret_knowledge',
+    category: 'Secrets & Intrigue',
+    summary: 'Atomic intrigue transitions: learns, suspects, forgets, or exposes.',
+    description: 'Manages character awareness of secrets with anti-metagaming precision. Action "exposes" flips status to "exposed" and optionally creates a public timeline entry.',
+    usageExample: 'chronicle/update_secret_knowledge { secretId: "secret-123", characterId: "Lord Raymund", action: "learns" }',
+  },
+  {
+    name: 'list_secrets',
+    category: 'Secrets & Intrigue',
+    summary: 'Query campaign secrets with filters and resolved entity names.',
+    description: 'Lists secrets in the active campaign with filters for status, severity, subject, or knower. Returns human-readable character and house names for LLM readability.',
+    usageExample: 'chronicle/list_secrets { unexposedOnly: true }',
+  },
+  {
+    name: 'get_character_knowledge',
+    category: 'Secrets & Intrigue',
+    summary: 'Anti-metagaming lens: query what a character knows, suspects, and blind spots.',
+    description: 'Returns what a character knows with certainty, what they merely suspect without leaking hidden truths, and the count of secrets about them they are unaware of.',
+    usageExample: 'chronicle/get_character_knowledge { characterId: "Jon Mooton" }',
+  },
+
+  // Director & Staging Tools
+  {
+    name: 'get_scene_briefing',
+    category: 'Director & Staging',
+    summary: 'Director Engine: generate a curated, comprehensive scene briefing before roleplay scenes.',
+    description: 'Gathers compact cast cards, in-room relational friction, grudges, atmosphere, and the Intrigue Matrix (active leverage, shared conspiracies, and anti-metagaming GM guardrails) for any combination of characters.',
+    usageExample: 'chronicle/get_scene_briefing { characterIds: ["Lord Raymund Mooton", "Jon Mooton"], locationName: "Maidenpool Great Hall" }',
+  },
+
   // Search & Help Tools
   {
     name: 'search_chronicle',
     category: 'Search & Recap',
     summary: 'Search across all entities in the active campaign.',
-    description: 'Performs global keyword search across characters, timeline entries, tomes, houses, and plot threads.',
-    usageExample: 'chronicle/search_chronicle { query: "Maidenpool" }',
+    description: 'Performs global keyword search across characters, timeline entries, tomes, houses, plot threads, and secrets.',
+    usageExample: 'chronicle/search_chronicle { query: "Maidenpool", includeSecrets: false }',
   },
   {
     name: 'get_realm_recap',
     category: 'Search & Recap',
-    summary: 'Generate an executive realm recap.',
-    description: 'Returns a comprehensive summary of the active campaign: player characters, living nobles, key recent timeline events, and open plot threads.',
+    summary: 'Generate an executive realm recap with pulse, active secrets summary, and recent voices.',
+    description: 'Returns a comprehensive summary of the active campaign: campaignPulse, [GM EYES ONLY] active secrets summary, recent voices (primary source tomes), living nobles, key timeline events, and open plot threads.',
     usageExample: 'chronicle/get_realm_recap {}',
   },
   {

@@ -1,4 +1,4 @@
-import { Storage, generateId } from '../storage.js';
+import { Storage, generateId, resolveEntityRef, resolveCharacterRef } from '../storage.js';
 import { RelationshipEdge, RelationshipEdgeSchema } from '../schema.js';
 import { z } from 'zod';
 
@@ -34,26 +34,34 @@ export function addRelationship(
   const activeId = storage.activeCampaignId;
   const now = Date.now();
 
+  const resolvedFromId = input.fromType === 'character'
+    ? resolveCharacterRef(storage, activeId, input.fromId)
+    : resolveEntityRef(storage, activeId, 'house', input.fromId);
+
+  const resolvedToId = input.toType === 'character'
+    ? resolveCharacterRef(storage, activeId, input.toId)
+    : resolveEntityRef(storage, activeId, 'house', input.toId);
+
   // Validate that both 'from' and 'to' entities belong to the active campaign
   let fromExists = false;
   if (input.fromType === 'character') {
     fromExists = storage.characters.some(
-      (c) => c.campaignId === activeId && (c.id === input.fromId || c.name.toLowerCase() === input.fromId.toLowerCase())
+      (c) => c.campaignId === activeId && (c.id === resolvedFromId || c.name.toLowerCase() === input.fromId.toLowerCase())
     );
   } else {
     fromExists = storage.houses.some(
-      (h) => h.campaignId === activeId && (h.id === input.fromId || h.name.toLowerCase() === input.fromId.toLowerCase())
+      (h) => h.campaignId === activeId && (h.id === resolvedFromId || h.name.toLowerCase() === input.fromId.toLowerCase())
     );
   }
 
   let toExists = false;
   if (input.toType === 'character') {
     toExists = storage.characters.some(
-      (c) => c.campaignId === activeId && (c.id === input.toId || c.name.toLowerCase() === input.toId.toLowerCase())
+      (c) => c.campaignId === activeId && (c.id === resolvedToId || c.name.toLowerCase() === input.toId.toLowerCase())
     );
   } else {
     toExists = storage.houses.some(
-      (h) => h.campaignId === activeId && (h.id === input.toId || h.name.toLowerCase() === input.toId.toLowerCase())
+      (h) => h.campaignId === activeId && (h.id === resolvedToId || h.name.toLowerCase() === input.toId.toLowerCase())
     );
   }
 
@@ -76,22 +84,25 @@ export function addRelationship(
     (e) =>
       e.campaignId === activeId &&
       e.fromType === input.fromType &&
-      e.fromId === input.fromId &&
+      (e.fromId === resolvedFromId || e.fromId === input.fromId) &&
       e.toType === input.toType &&
-      e.toId === input.toId &&
+      (e.toId === resolvedToId || e.toId === input.toId) &&
       e.type === input.type
   );
 
   if (existingIndex >= 0) {
     const existingEdge = storage.relationships[existingIndex];
     existingEdge.note = input.note ?? existingEdge.note;
+    if (input.isSecret !== undefined) existingEdge.isSecret = input.isSecret;
+    if (input.sentiment !== undefined) existingEdge.sentiment = input.sentiment;
+    if (input.publicFacade !== undefined) existingEdge.publicFacade = input.publicFacade;
     existingEdge.createdAt = now;
 
     const inverseEdge = storage.relationships.find(
       (e) => e.campaignId === activeId && e.pairId === existingEdge.pairId && e.id !== existingEdge.id
     );
     if (inverseEdge) {
-      if (input.note) {
+      if (input.note && !input.oneWay) {
         inverseEdge.note = `Inverse of ${input.type}: ${input.note}`;
       }
       inverseEdge.createdAt = now;
@@ -113,25 +124,32 @@ export function addRelationship(
     campaignId: activeId,
     pairId,
     fromType: input.fromType,
-    fromId: input.fromId,
+    fromId: resolvedFromId,
     toType: input.toType,
-    toId: input.toId,
+    toId: resolvedToId,
     type: input.type,
     note: input.note,
+    isSecret: input.isSecret,
+    sentiment: input.sentiment,
+    publicFacade: input.publicFacade,
     createdAt: now,
   };
 
-  const inverseType = getInverseType(input.type);
+  const inverseType = input.oneWay ? 'other' : getInverseType(input.type);
+  const inverseNote = input.oneWay
+    ? "Unaware of counterpart's true stance"
+    : (input.note ? `Inverse of ${input.type}: ${input.note}` : undefined);
+
   const inverseEdge: RelationshipEdge = {
     id: generateId(),
     campaignId: activeId,
     pairId,
     fromType: input.toType,
-    fromId: input.toId,
+    fromId: resolvedToId,
     toType: input.fromType,
-    toId: input.fromId,
+    toId: resolvedFromId,
     type: inverseType,
-    note: input.note ? `Inverse of ${input.type}: ${input.note}` : undefined,
+    note: inverseNote,
     createdAt: now,
   };
 
@@ -149,18 +167,25 @@ export function addRelationship(
 export function listRelationships(
   storage: Storage,
   entityType: 'character' | 'house',
-  entityId: string
+  entityId: string,
+  includeSecrets: boolean = true
 ) {
   const activeId = storage.activeCampaignId;
-  const queryId = entityId.trim();
+  const canonicalId = entityType === 'character'
+    ? resolveCharacterRef(storage, activeId, entityId)
+    : resolveEntityRef(storage, activeId, 'house', entityId);
 
   // Find all edges where entity is fromId scoped to active campaign
-  const edges = storage.relationships.filter(
+  let edges = storage.relationships.filter(
     (e) =>
       e.campaignId === activeId &&
       e.fromType === entityType &&
-      (e.fromId === queryId || e.fromId.toLowerCase() === queryId.toLowerCase())
+      (e.fromId === canonicalId || e.fromId.toLowerCase() === entityId.trim().toLowerCase())
   );
+
+  if (!includeSecrets) {
+    edges = edges.filter((e) => !e.isSecret);
+  }
 
   const resolved = edges.map((e) => {
     let targetName = e.toId;
@@ -196,6 +221,9 @@ export function listRelationships(
       toId: e.toId,
       type: e.type,
       note: e.note,
+      isSecret: e.isSecret,
+      sentiment: e.sentiment,
+      publicFacade: e.publicFacade,
       createdAt: e.createdAt,
       targetName,
       targetStatus,

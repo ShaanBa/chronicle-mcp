@@ -395,3 +395,11 @@ export const SecretSchema = z.object({
   note: z.string().optional(),         // Optional historyLog append note
   date: z.string().optional(),
 });
+
+export const SceneBriefingInputSchema = z.object({
+  characterIds: z.array(z.string()).min(1, 'Provide at least one character in the scene'),
+  locationName: z.string().optional(),
+  povCharacterId: z.string().optional(),
+  includeOmniscientSecrets: z.boolean().default(true),
+  campaignId: z.string().optional(),
+});

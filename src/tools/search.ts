@@ -3,7 +3,7 @@ import { Storage } from '../storage.js';
 export interface SearchResult {
   id: string;
   titleOrName: string;
-  section: 'characters' | 'timeline' | 'tomes' | 'threads' | 'houses';
+  section: 'characters' | 'timeline' | 'tomes' | 'threads' | 'houses' | 'secrets';
   excerpt: string;
   matchedFields: string[];
 }
@@ -30,20 +30,22 @@ function extractExcerpt(fullText: string, query: string, maxLength: number = 150
 export function searchChronicle(
   storage: Storage,
   query: string,
-  sections: ('characters' | 'timeline' | 'tomes' | 'threads' | 'houses')[] = [
+  sections: ('characters' | 'timeline' | 'tomes' | 'threads' | 'houses' | 'secrets')[] = [
     'characters',
     'timeline',
     'tomes',
     'threads',
     'houses',
-  ]
+    'secrets',
+  ],
+  includeSecrets: boolean = true
 ) {
   const activeId = storage.activeCampaignId;
   const queryTrimmed = query.trim();
   if (!queryTrimmed) {
     return {
       success: true,
-      results: { characters: [], timeline: [], tomes: [], threads: [], houses: [] },
+      results: { characters: [], timeline: [], tomes: [], threads: [], houses: [], secrets: [] },
     };
   }
 
@@ -54,12 +56,14 @@ export function searchChronicle(
     tomes: SearchResult[];
     threads: SearchResult[];
     houses: SearchResult[];
+    secrets: SearchResult[];
   } = {
     characters: [],
     timeline: [],
     tomes: [],
     threads: [],
     houses: [],
+    secrets: [],
   };
 
   if (sections.includes('characters')) {
@@ -189,6 +193,32 @@ export function searchChronicle(
     }
   }
 
+  if (includeSecrets && sections.includes('secrets')) {
+    const secrets = storage.secrets.filter((s) => s.campaignId === activeId);
+    for (const s of secrets) {
+      const matchedFields: string[] = [];
+      if (s.title.toLowerCase().includes(qLower)) matchedFields.push('title');
+      if (s.truth.toLowerCase().includes(qLower)) matchedFields.push('truth');
+      if (s.publicCoverStory && s.publicCoverStory.toLowerCase().includes(qLower)) matchedFields.push('publicCoverStory');
+      if (s.leverageNote && s.leverageNote.toLowerCase().includes(qLower)) matchedFields.push('leverageNote');
+      if (s.tags.some((t) => t.toLowerCase().includes(qLower))) matchedFields.push('tags');
+      if (s.historyLog && s.historyLog.some((hl) => hl.note.toLowerCase().includes(qLower))) matchedFields.push('historyLog');
+
+      if (matchedFields.length > 0) {
+        const textForExcerpt = s.publicCoverStory ? `${s.title}: ${s.publicCoverStory} [Truth: ${s.truth}]` : `${s.title}: ${s.truth}`;
+        results.secrets.push({
+          id: s.id,
+          titleOrName: s.title,
+          section: 'secrets',
+          excerpt: extractExcerpt(textForExcerpt, queryTrimmed),
+          matchedFields,
+        });
+
+        if (results.secrets.length >= 15) break;
+      }
+    }
+  }
+
   return { success: true, results };
 }
 
@@ -196,7 +226,58 @@ export function getRealmRecap(storage: Storage) {
   const activeCampaign = storage.getActiveCampaign();
   const activeId = activeCampaign.id;
 
-  // 1. Recent events for active campaign
+  // 1. Campaign Pulse block
+  let playerCharacterName: string | undefined = undefined;
+  if (activeCampaign.playerCharacterId) {
+    const pc = storage.characters.find(
+      (c) => c.campaignId === activeId && c.id === activeCampaign.playerCharacterId
+    );
+    playerCharacterName = pc ? pc.name : activeCampaign.playerCharacterId;
+  }
+
+  const campaignPulse = {
+    campaignName: activeCampaign.name,
+    campaignId: activeCampaign.id,
+    setting: activeCampaign.setting,
+    currentDate: activeCampaign.currentDate,
+    currentSortYear: activeCampaign.currentSortYear,
+    currentEra: activeCampaign.currentEra,
+    playerCharacter: playerCharacterName,
+    realmMood: activeCampaign.realmMood,
+  };
+
+  // 2. Active Secrets Summary [GM EYES ONLY]
+  const buriedOrWhispered = storage.secrets.filter(
+    (s) => s.campaignId === activeId && (s.status === 'buried' || s.status === 'whispered')
+  );
+  const activeSecretsSummary = {
+    flag: '[GM EYES ONLY]',
+    count: buriedOrWhispered.length,
+    secrets: buriedOrWhispered.map((s) => ({
+      id: s.id,
+      title: s.title,
+      severity: s.severity,
+      status: s.status,
+    })),
+  };
+
+  // 3. Recent Voices (2-3 primary-source Tomes like ballads, letters, rumors)
+  const nonChronicleTomes = storage.tomes.filter(
+    (t) => t.campaignId === activeId && t.sourceType && t.sourceType !== 'chronicle'
+  );
+  const candidateTomes = nonChronicleTomes.length > 0 ? nonChronicleTomes : storage.tomes.filter((t) => t.campaignId === activeId);
+  const sortedTomes = [...candidateTomes].sort((a, b) => b.createdAt - a.createdAt);
+  const recentVoices = sortedTomes.slice(0, 3).map((t) => ({
+    id: t.id,
+    title: t.title,
+    sourceType: t.sourceType || 'chronicle',
+    inWorldAuthor: t.inWorldAuthor || 'Anonymous',
+    inGameDate: t.inGameDate,
+    reliability: t.reliability || 'true',
+    gist: t.content.length > 140 ? t.content.slice(0, 140) + '...' : t.content,
+  }));
+
+  // 4. Recent events for active campaign
   const campaignEvents = storage.timeline.filter((e) => e.campaignId === activeId);
   const sortedEvents = [...campaignEvents].sort((a, b) => b.createdAt - a.createdAt);
   const recentEvents = sortedEvents.slice(0, 5).map((e) => ({
@@ -206,7 +287,7 @@ export function getRealmRecap(storage: Storage) {
     gist: e.narrative.length > 120 ? e.narrative.slice(0, 120) + '...' : e.narrative,
   }));
 
-  // 2. Active living characters for active campaign
+  // 5. Active living characters for active campaign
   const aliveChars = storage.characters.filter(
     (c) => c.campaignId === activeId && c.status === 'alive'
   );
@@ -215,7 +296,7 @@ export function getRealmRecap(storage: Storage) {
     names: aliveChars.map((c) => (c.house ? `${c.name} of House ${c.house}` : c.name)),
   };
 
-  // 3. Top tags across last 15 timeline events in active campaign
+  // 6. Top tags across last 15 timeline events in active campaign
   const last15Events = sortedEvents.slice(0, 15);
   const tagCounts: Record<string, number> = {};
   for (const event of last15Events) {
@@ -232,7 +313,7 @@ export function getRealmRecap(storage: Storage) {
     .slice(0, 5)
     .map(([tag, count]) => ({ tag, count }));
 
-  // 4. Open Plot Threads for active campaign
+  // 7. Open Plot Threads for active campaign
   const openThreads = storage.threads
     .filter((t) => t.campaignId === activeId && t.status === 'open')
     .map((t) => ({
@@ -246,6 +327,9 @@ export function getRealmRecap(storage: Storage) {
     recap: {
       campaign: activeCampaign.name,
       campaignId: activeCampaign.id,
+      campaignPulse,
+      activeSecretsSummary,
+      recentVoices,
       recentEvents,
       activeCharacters,
       topTags,
