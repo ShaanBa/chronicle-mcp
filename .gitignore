@@ -44,3 +44,7 @@ chronicle-viewer*.html
 Thumbs.db
 .vscode/
 .idea/
+
+# Repomix & Bundles
+repomix-output.*
+*-bundle.*
